@@ -197,6 +197,22 @@ const MASTRACODE_HOOK_EVENTS: [(&str, &str); 12] = [
     ("Stop", "idle"),
     ("SessionEnd", "release"),
 ];
+const TRAE_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
+const TRAE_HOOK_ASSET: &str = include_str!("assets/trae/herdr-agent-state.sh");
+const TRAE_INTEGRATION_VERSION: u32 = 1;
+const TRAE_HOOK_EVENTS: [(&str, &str); 10] = [
+    ("SessionStart", "session"),
+    ("UserPromptSubmit", "working"),
+    ("PreToolUse", "working"),
+    ("PostToolUse", "working"),
+    ("SubagentStart", "working"),
+    ("PreCompact", "working"),
+    ("PermissionRequest", "blocked"),
+    ("Notification", "blocked"),
+    ("Stop", "idle"),
+    ("SessionEnd", "release"),
+];
+
 const INTEGRATION_VERSION_MARKER: &str = "HERDR_INTEGRATION_VERSION=";
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";

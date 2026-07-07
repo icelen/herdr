@@ -3307,3 +3307,129 @@ fn uninstall_mastracode_errors_when_event_value_not_array() {
     }
     let _ = fs::remove_dir_all(base);
 }
+
+#[test]
+fn install_trae_writes_hook_and_updates_hooks_and_config() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let trae_dir = home.join(".trae");
+    fs::create_dir_all(&trae_dir).unwrap();
+    fs::write(
+        trae_dir.join("hooks.json"),
+        r#"{"version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo flux"}]}]}}"#,
+    )
+    .unwrap();
+    fs::write(trae_dir.join("traecli.toml"), "model = \"trae-1\"\n").unwrap();
+    std::env::set_var("HOME", &home);
+
+    let installed = install_trae().unwrap();
+    let hook_content = fs::read_to_string(&installed.hook_path).unwrap();
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(&installed.hooks_path).unwrap()).unwrap();
+    let config = fs::read_to_string(&installed.config_path).unwrap();
+
+    assert_eq!(installed.hook_path, trae_dir.join(TRAE_HOOK_INSTALL_NAME));
+    assert_eq!(installed.hooks_path, trae_dir.join("hooks.json"));
+    assert_eq!(installed.config_path, trae_dir.join("traecli.toml"));
+    assert_eq!(hook_content, TRAE_HOOK_ASSET);
+    assert_eq!(hooks["version"], 1);
+    // pre-existing (non-herdr) hook entry must be preserved alongside ours.
+    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
+    assert!(hooks["hooks"]["SessionStart"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|group| group["hooks"][0]["command"] == "echo flux"));
+    for (event, action) in TRAE_HOOK_EVENTS {
+        let found = hooks["hooks"][event]
+            .as_array()
+            .unwrap_or_else(|| panic!("missing herdr hook group for {event}"))
+            .iter()
+            .flat_map(|group| group["hooks"].as_array().unwrap().iter())
+            .filter_map(|hook| hook["command"].as_str())
+            .any(|command| command.contains(&format!(" {action}")));
+        assert!(found, "missing herdr hook command for {event} -> {action}");
+    }
+    assert!(config.contains("model = \"trae-1\""));
+    assert!(config.contains("[features]"));
+    assert!(config.contains("hooks = true"));
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_trae_is_idempotent_for_hook_entries_and_feature_flag() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let trae_dir = home.join(".trae");
+    fs::create_dir_all(&trae_dir).unwrap();
+    std::env::set_var("HOME", &home);
+
+    install_trae().unwrap();
+    install_trae().unwrap();
+
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
+    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
+
+    for (event, _action) in TRAE_HOOK_EVENTS {
+        assert_eq!(
+            hooks["hooks"][event].as_array().unwrap().len(),
+            1,
+            "event {event} should have exactly one herdr hook group after reinstalling"
+        );
+    }
+    assert_eq!(config.matches("hooks = true").count(), 1);
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn uninstall_trae_removes_herdr_hooks_and_leaves_config_alone() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let trae_dir = home.join(".trae");
+    fs::create_dir_all(&trae_dir).unwrap();
+    std::env::set_var("HOME", &home);
+
+    install_trae().unwrap();
+    let result = uninstall_trae().unwrap();
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
+    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
+
+    assert!(result.removed_hook_file);
+    assert!(result.updated_hooks);
+    assert!(!result.hook_path.exists());
+    for (event, _action) in TRAE_HOOK_EVENTS {
+        assert!(
+            hooks["hooks"].get(event).is_none(),
+            "event {event} should have no hook entries left"
+        );
+    }
+    assert!(config.contains("hooks = true"));
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_trae_errors_when_config_dir_missing() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+
+    let err = install_trae().unwrap_err().to_string();
+
+    assert!(err.contains("trae config directory not found"));
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}

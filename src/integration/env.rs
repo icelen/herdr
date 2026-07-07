@@ -128,6 +128,10 @@ pub(crate) fn mastracode_dir() -> io::Result<PathBuf> {
     Ok(home_dir()?.join(".mastracode"))
 }
 
+pub(crate) fn trae_dir() -> io::Result<PathBuf> {
+    Ok(home_dir()?.join(".trae"))
+}
+
 pub(crate) fn home_dir() -> io::Result<PathBuf> {
     if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(home));

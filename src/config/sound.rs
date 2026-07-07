@@ -138,6 +138,7 @@ impl AgentSoundOverrides {
             Some(Agent::Hermes) => self.hermes,
             Some(Agent::Kilo) => self.kilo,
             Some(Agent::Qodercli) => self.qodercli,
+            Some(Agent::Trae) => AgentSoundSetting::Default,
             None => AgentSoundSetting::Default,
         }
     }

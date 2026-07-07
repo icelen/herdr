@@ -15,7 +15,7 @@ use super::config_edit::{
 use super::env::{
     claude_dir, codex_dir, copilot_dir, cursor_dir, devin_dir, droid_dir, hermes_dir,
     hermes_plugin_dir, kilo_dir, kimi_dir, mastracode_dir, omp_extension_dir, opencode_dir,
-    pi_extension_dir, qodercli_dir,
+    pi_extension_dir, qodercli_dir, trae_dir,
 };
 use super::file_ops::{
     make_executable, remove_dir_all_if_exists, remove_file_if_exists, remove_legacy_bash_hook_file,
@@ -27,7 +27,8 @@ use super::types::{
     HermesInstallPaths, HermesUninstallResult, KiloInstallPaths, KiloUninstallResult,
     KimiInstallPaths, KimiUninstallResult, MastracodeInstallPaths, MastracodeUninstallResult,
     OmpInstallPaths, OmpUninstallResult, OpenCodeInstallPaths, OpenCodeUninstallResult,
-    PiUninstallResult, QodercliInstallPaths, QodercliUninstallResult,
+    PiUninstallResult, QodercliInstallPaths, QodercliUninstallResult, TraeInstallPaths,
+    TraeUninstallResult,
 };
 use super::{
     CLAUDE_HOOK_ASSET, CLAUDE_HOOK_INSTALL_NAME, CODEX_HOOK_ASSET, CODEX_HOOK_INSTALL_NAME,
@@ -42,7 +43,8 @@ use super::{
     MASTRACODE_HOOK_INSTALL_NAME, MASTRACODE_HOOK_TIMEOUT_MS, OMP_EXTENSION_ASSET,
     OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET, OPENCODE_PLUGIN_INSTALL_NAME,
     PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS,
-    QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
+    QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS, TRAE_HOOK_ASSET,
+    TRAE_HOOK_EVENTS, TRAE_HOOK_INSTALL_NAME,
 };
 
 pub(crate) fn install_pi() -> io::Result<PathBuf> {
@@ -1190,6 +1192,121 @@ pub(crate) fn uninstall_mastracode() -> io::Result<MastracodeUninstallResult> {
     Ok(MastracodeUninstallResult {
         hook_path,
         hooks_path,
+        removed_hook_file,
+        updated_hooks,
+    })
+}
+
+pub(crate) fn install_trae() -> io::Result<TraeInstallPaths> {
+    let dir = trae_dir()?;
+    if !dir.is_dir() {
+        return Err(io::Error::other(format!(
+            "trae config directory not found at {}. install trae (traex) first",
+            dir.display()
+        )));
+    }
+
+    let hook_path = dir.join(TRAE_HOOK_INSTALL_NAME);
+    fs::write(&hook_path, TRAE_HOOK_ASSET)?;
+    make_executable(&hook_path)?;
+
+    let hooks_path = dir.join("hooks.json");
+    let mut hooks_file = if hooks_path.is_file() {
+        serde_json::from_str::<Value>(&fs::read_to_string(&hooks_path)?).map_err(|err| {
+            io::Error::other(format!("failed to parse {}: {err}", hooks_path.display()))
+        })?
+    } else {
+        json!({ "version": 1 })
+    };
+
+    if hooks_file.get("version").is_none() {
+        hooks_file
+            .as_object_mut()
+            .ok_or_else(|| {
+                io::Error::other(format!(
+                    "trae hooks file at {} must be a JSON object",
+                    hooks_path.display()
+                ))
+            })?
+            .insert("version".to_string(), json!(1));
+    }
+
+    let hooks = ensure_hooks_object(
+        &mut hooks_file,
+        &hooks_path,
+        "trae hooks file",
+        "trae hooks file hooks",
+    )?;
+    for (event, action) in TRAE_HOOK_EVENTS {
+        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+    }
+    for (event, action) in TRAE_HOOK_EVENTS {
+        ensure_command_hook(
+            hooks,
+            event,
+            hook_command(&hook_path, Some(action)),
+            10,
+            None,
+        )?;
+    }
+    remove_legacy_bash_hook_file(&hook_path)?;
+
+    fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+
+    let config_path = dir.join("traecli.toml");
+    let existing_config = if config_path.is_file() {
+        fs::read_to_string(&config_path)?
+    } else {
+        String::new()
+    };
+    let new_config = build_codex_config_with_hooks(&existing_config);
+    if new_config != existing_config {
+        fs::write(&config_path, new_config)?;
+    }
+
+    Ok(TraeInstallPaths {
+        hook_path,
+        hooks_path,
+        config_path,
+    })
+}
+
+pub(crate) fn uninstall_trae() -> io::Result<TraeUninstallResult> {
+    let trae_dir = trae_dir()?;
+    let hook_path = trae_dir.join(TRAE_HOOK_INSTALL_NAME);
+    let hooks_path = trae_dir.join("hooks.json");
+    let config_path = trae_dir.join("traecli.toml");
+    let mut updated_hooks = false;
+
+    if hooks_path.is_file() {
+        let mut hooks_file = serde_json::from_str::<Value>(&fs::read_to_string(&hooks_path)?)
+            .map_err(|err| {
+                io::Error::other(format!("failed to parse {}: {err}", hooks_path.display()))
+            })?;
+
+        if let Some(hooks) = hooks_object_if_present(
+            &mut hooks_file,
+            &hooks_path,
+            "trae hooks file",
+            "trae hooks file hooks",
+        )? {
+            for (event, action) in TRAE_HOOK_EVENTS {
+                updated_hooks |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+            }
+        }
+
+        if updated_hooks {
+            fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+        }
+    }
+
+    let removed_hook_file =
+        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
+
+    Ok(TraeUninstallResult {
+        hook_path,
+        hooks_path,
+        config_path,
         removed_hook_file,
         updated_hooks,
     })

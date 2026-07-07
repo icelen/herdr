@@ -61,6 +61,7 @@ pub enum Agent {
     Hermes,
     Kilo,
     Qodercli,
+    Trae,
 }
 
 impl Agent {
@@ -108,6 +109,7 @@ pub fn agent_label(agent: Agent) -> &'static str {
         Agent::Hermes => "hermes",
         Agent::Kilo => "kilo",
         Agent::Qodercli => "qodercli",
+        Agent::Trae => "trae",
     }
 }
 
@@ -134,6 +136,7 @@ pub fn parse_agent_label(agent: &str) -> Option<Agent> {
         "hermes" | "hermes-agent" => Some(Agent::Hermes),
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
+        "trae" | "traex" | "trae-cli" => Some(Agent::Trae),
         _ => None,
     }
 }
@@ -164,6 +167,7 @@ pub fn identify_agent(process_name: &str) -> Option<Agent> {
         "hermes" | "hermes-agent" => Some(Agent::Hermes),
         "kilo" | "kilo-code" | "kilo code" => Some(Agent::Kilo),
         "qodercli" | "qoderclicn" | "qoder" | "qodercn" => Some(Agent::Qodercli),
+        "trae" | "traex" | "trae-cli" => Some(Agent::Trae),
         _ => None,
     }
 }

@@ -88,6 +88,13 @@ pub(crate) struct MastracodeInstallPaths {
 }
 
 #[derive(Debug)]
+pub(crate) struct TraeInstallPaths {
+    pub hook_path: PathBuf,
+    pub hooks_path: PathBuf,
+    pub config_path: PathBuf,
+}
+
+#[derive(Debug)]
 pub(crate) struct MastracodeUninstallResult {
     pub hook_path: PathBuf,
     pub hooks_path: PathBuf,
@@ -226,4 +233,13 @@ pub(crate) struct HermesUninstallResult {
     pub config_path: PathBuf,
     pub removed_plugin_dir: bool,
     pub updated_config: bool,
+}
+
+#[derive(Debug)]
+pub(crate) struct TraeUninstallResult {
+    pub hook_path: PathBuf,
+    pub hooks_path: PathBuf,
+    pub config_path: PathBuf,
+    pub removed_hook_file: bool,
+    pub updated_hooks: bool,
 }
