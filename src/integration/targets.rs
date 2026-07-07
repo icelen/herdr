@@ -44,7 +44,7 @@ use super::{
     OMP_EXTENSION_INSTALL_NAME, OPENCODE_PLUGIN_ASSET, OPENCODE_PLUGIN_INSTALL_NAME,
     PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET, QODERCLI_HOOK_EVENTS,
     QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS, TRAE_HOOK_ASSET,
-    TRAE_HOOK_EVENTS, TRAE_HOOK_INSTALL_NAME,
+    TRAE_HOOK_EVENTS, TRAE_HOOK_INSTALL_NAME, TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS,
 };
 
 pub(crate) fn install_pi() -> io::Result<PathBuf> {
@@ -1237,6 +1237,9 @@ pub(crate) fn install_trae() -> io::Result<TraeInstallPaths> {
         "trae hooks file",
         "trae hooks file hooks",
     )?;
+    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
+        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+    }
     for (event, action) in TRAE_HOOK_EVENTS {
         remove_hook_commands(hooks, event, &hook_path, Some(action))?;
     }
@@ -1290,6 +1293,9 @@ pub(crate) fn uninstall_trae() -> io::Result<TraeUninstallResult> {
             "trae hooks file",
             "trae hooks file hooks",
         )? {
+            for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
+                updated_hooks |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+            }
             for (event, action) in TRAE_HOOK_EVENTS {
                 updated_hooks |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
             }

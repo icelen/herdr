@@ -3389,6 +3389,62 @@ fn install_trae_is_idempotent_for_hook_entries_and_feature_flag() {
 }
 
 #[test]
+fn install_trae_removes_legacy_notification_hook_entry() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let trae_dir = home.join(".trae");
+    fs::create_dir_all(&trae_dir).unwrap();
+    std::env::set_var("HOME", &home);
+
+    let hook_path = trae_dir.join(TRAE_HOOK_INSTALL_NAME);
+    let mut hooks = Map::new();
+    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
+        hooks.insert(
+            event.to_string(),
+            json!([
+                {
+                    "hooks": [{
+                        "type": "command",
+                        "command": hook_command(&hook_path, Some(action)),
+                        "timeout": 10
+                    }]
+                }
+            ]),
+        );
+    }
+    fs::write(
+        trae_dir.join("hooks.json"),
+        serde_json::to_string_pretty(&json!({ "version": 1, "hooks": hooks })).unwrap(),
+    )
+    .unwrap();
+
+    install_trae().unwrap();
+
+    let installed_hooks: Value =
+        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
+    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
+        let legacy_command = hook_command(&hook_path, Some(action));
+        let entries = installed_hooks["hooks"][event].as_array();
+        assert!(
+            entries.is_none_or(|entries| {
+                entries.iter().all(|entry| {
+                    entry["hooks"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|hook| hook["command"] != json!(legacy_command))
+                })
+            }),
+            "expected legacy {event} -> {action} hook to be removed"
+        );
+    }
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
 fn uninstall_trae_removes_herdr_hooks_and_leaves_config_alone() {
     let _lock = integration_env_lock();
     let base = unique_base();
