@@ -1,5 +1,5 @@
 id = "trae"
-version = "2026.07.09.1"
+version = "2026.07.09.2"
 min_engine_version = 2
 updated_at = "2026-07-09T00:00:00Z"
 
@@ -12,6 +12,7 @@ visible_blocker = true
 any = [
   { contains = ["press enter to confirm or esc to cancel"] },
   { contains = ["enter to submit | esc to cancel"] },
+  { contains = ["enter to submit answer"] },
 ]
 
 [[rules]]
@@ -21,6 +22,9 @@ priority = 500
 region = "whole_recent"
 visible_working = true
 contains = ["esc to interrupt"]
+not = [
+  { contains = ["enter to submit answer"] },
+]
 
 [[rules]]
 id = "no_activity_idle"
@@ -33,4 +37,5 @@ not = [
   { contains = ["esc to interrupt"] },
   { contains = ["press enter to confirm or esc to cancel"] },
   { contains = ["enter to submit | esc to cancel"] },
+  { contains = ["enter to submit answer"] },
 ]

@@ -415,6 +415,24 @@ fn trae_manifest_detects_idle_working_and_blocked_states() {
         Some("permission_prompt_blocked")
     );
     assert!(mcp_permission_prompt.visible_blocker);
+
+    // Captured from a real pane waiting on Trae's native structured-question
+    // UI. Its footer also contains "esc to interrupt" (shared with the
+    // working-turn footer), so this must be classified via
+    // "enter to submit answer", not misread as still working.
+    let structured_question_prompt = explain(
+        Agent::Trae,
+        "──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\n  Question 1/1 (1 unanswered)\n  Which would you like?\n\n  ❯ 1. Coffee             A hot, caffeinated pick-me-up.\n    2. Tea                A milder, soothing alternative.\n    3. None of the above  Optionally, add details in notes (tab).\n\n  tab to add notes | enter to submit answer | esc to interrupt\n",
+    );
+    assert_eq!(structured_question_prompt.state, AgentState::Blocked);
+    assert_eq!(
+        structured_question_prompt
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.id.as_str()),
+        Some("permission_prompt_blocked")
+    );
+    assert!(structured_question_prompt.visible_blocker);
 }
 
 #[test]
