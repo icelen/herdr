@@ -360,6 +360,64 @@ fn devin_manifest_detects_idle_working_and_blocked_states() {
 }
 
 #[test]
+fn trae_manifest_detects_idle_working_and_blocked_states() {
+    // Captured from a real idle `traecli` pane via `herdr agent read <pane>
+    // --source detection --format text`.
+    let idle = explain(
+        Agent::Trae,
+        "╭─────────────────────────────────────────────────────────╮\n│ ▄▄▄▄▄▄▄                                                 │\n│ █ ◆ ◆ █  TRAE CLI Next (v0.200.16)                      │\n│  ▀▀▀▀▀▀                                                 │\n│ Good morning, lei.cen                                   │\n│                                                         │\n│ model:     GPT-5.5 (MAX) high   /model to change        │\n│ directory: ~/go/src/code.byted.org/tiktok/bric_monorepo │\n╰─────────────────────────────────────────────────────────╯\n\nToken usage: total=49,001 input=47,411 (+ 133,120 cached) output=1,590 (reasoning 876)\n\n▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n❯ Summarize recent commits\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n  GPT-5.5 (MAX) high · Context 100% left · ~/go/src/code.byted.org/tiktok/bric_monorepo · master … ◐ Workspace Edit (shift+tab to cycle)\n",
+    );
+    assert_eq!(idle.state, AgentState::Idle);
+    assert_eq!(
+        idle.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("no_activity_idle")
+    );
+    assert!(idle.visible_idle);
+
+    // Captured from a real pane mid-turn (running a background shell command).
+    let working = explain(
+        Agent::Trae,
+        "◆ Running sleep 60 && gdpa-cli run env --session-id sess_20260709_114459_c77957f1 --input '{\"action\": \"dsl_status\"}' 2>&1 | tail -50\n  └ (22s · timeout 2m)\n    (ctrl+b ctrl+b (twice) to run in background)\n\n◈ Running command… (3m 27s • ↑ 4.05K tokens • esc to interrupt) · 1 shell running… · /ps to manage\n▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄\n❯ Improve documentation in @filename\n▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀\n  openrouter-3o (MAX) xhigh · Context 82% left · ~/go/src/code.byted.org/bric_webarch/faraday_admin · feat/captcha-decisi… ▰ Full Access\n",
+    );
+    assert_eq!(working.state, AgentState::Working);
+    assert_eq!(
+        working.matched_rule.as_ref().map(|rule| rule.id.as_str()),
+        Some("turn_in_progress_working")
+    );
+    assert!(working.visible_working);
+
+    // Captured from a real pane waiting on a shell-command approval prompt.
+    let command_permission_prompt = explain(
+        Agent::Trae,
+        "◆ Running bazelisk test //shared/plugin/newton/action:action_test\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\n  Would you like to run the following command?\n\n  Reason: Do you want me to run the targeted Bazel test for the merged Newton action package before committing the merge?\n\n  $ bazelisk test //shared/plugin/newton/action:action_test\n\n❯ 1. Yes, proceed (y)\n  2. Yes, switch this session to auto mode (r)\n  3. Yes, switch this session to full access mode (f)\n  4. No, and tell TRAE CLI what to do differently (esc)\n\n  Press enter to confirm or esc to cancel\n",
+    );
+    assert_eq!(command_permission_prompt.state, AgentState::Blocked);
+    assert_eq!(
+        command_permission_prompt
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.id.as_str()),
+        Some("permission_prompt_blocked")
+    );
+    assert!(command_permission_prompt.visible_blocker);
+
+    // Captured from a real pane waiting on an MCP tool-call approval prompt.
+    let mcp_permission_prompt = explain(
+        Agent::Trae,
+        "◆ Calling\n  └ lark-docs.import_markdown_to_lark({\"filePath\":\"/path/to/file.md\",\"title\":\"Title\"})\n\n──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n\n  Field 1/1\n  Allow the lark-docs MCP server to run tool \"import_markdown_to_lark\"?\n\n  filePath: /path/to/file.md\n  title: Title\n\n  ❯ 1. Allow                   Run the tool and continue.\n    2. Allow for this session  Run the tool and remember this choice for this session.\n    3. Always allow            Run the tool and remember this choice for future tool calls.\n    4. Cancel                  Cancel this tool call\n  enter to submit | esc to cancel\n",
+    );
+    assert_eq!(mcp_permission_prompt.state, AgentState::Blocked);
+    assert_eq!(
+        mcp_permission_prompt
+            .matched_rule
+            .as_ref()
+            .map(|rule| rule.id.as_str()),
+        Some("permission_prompt_blocked")
+    );
+    assert!(mcp_permission_prompt.visible_blocker);
+}
+
+#[test]
 fn manifest_validation_rejects_unknown_fields_empty_rules_invalid_regions_and_regexes() {
     assert!(parse_manifest(
         r#"
