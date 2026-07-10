@@ -964,6 +964,14 @@ fn render_workspace_list(
                 );
             }
         }
+
+        if is_active {
+            let buf = frame.buffer_mut();
+            for y in row_y..(row_y + row_height).min(list_bottom) {
+                buf[(card.rect.x, y)].set_symbol("▐");
+                buf[(card.rect.x, y)].set_style(Style::default().fg(p.accent));
+            }
+        }
     }
 
     if let Some(y) = insertion_row.filter(|y| *y < list_bottom) {
@@ -1061,6 +1069,7 @@ fn render_agent_detail(
 
         // Check if this agent entry corresponds to the active session
         let is_active = app.is_active_pane(detail.ws_idx, detail.tab_idx, detail.pane_id);
+        let entry_start_y = row_y;
 
         let (icon, icon_style) = agent_icon(detail.state, detail.seen, app.spinner_tick, p);
         let label_color = state_label_color(detail.state, detail.seen, p);
@@ -1119,6 +1128,14 @@ fn render_agent_detail(
             Rect::new(body.x, row_y, body.width, 1),
         );
         row_y += 1;
+
+        if is_active {
+            let buf = frame.buffer_mut();
+            for y in entry_start_y..row_y.min(body_bottom) {
+                buf[(body.x, y)].set_symbol("▐");
+                buf[(body.x, y)].set_style(Style::default().fg(p.accent));
+            }
+        }
 
         if row_y < body_bottom {
             row_y += 1;
@@ -1498,6 +1515,41 @@ mod tests {
                 render_workspace_list(&app, &runtimes, frame, Rect::new(0, 0, 15, 6), false)
             })
             .expect("workspace list should render");
+    }
+
+    #[test]
+    fn workspace_list_draws_accent_bar_only_on_active_workspace_row() {
+        let mut app = crate::app::state::AppState::test_new();
+        app.workspaces = vec![Workspace::test_new("main"), Workspace::test_new("other")];
+        app.active = Some(0);
+        app.selected = 1;
+        app.mode = Mode::Terminal;
+        app.view.workspace_card_areas = vec![
+            crate::app::state::WorkspaceCardArea {
+                ws_idx: 0,
+                rect: Rect::new(0, 1, 15, 1),
+                indented: false,
+            },
+            crate::app::state::WorkspaceCardArea {
+                ws_idx: 1,
+                rect: Rect::new(0, 2, 15, 1),
+                indented: false,
+            },
+        ];
+
+        let mut terminal = Terminal::new(TestBackend::new(15, 6)).expect("test terminal");
+        let runtimes = crate::terminal::TerminalRuntimeRegistry::new();
+
+        terminal
+            .draw(|frame| {
+                render_workspace_list(&app, &runtimes, frame, Rect::new(0, 0, 15, 6), false)
+            })
+            .expect("workspace list should render");
+
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(0, 1)].symbol(), "▐");
+        assert_eq!(buffer[(0, 1)].style().fg, Some(app.palette.accent));
+        assert_ne!(buffer[(0, 2)].symbol(), "▐");
     }
 
     fn workspace_with_worktree_space(
