@@ -1543,7 +1543,7 @@ mod tests {
         let first = row_text(buffer, body.y, 25);
         let second = row_text(buffer, body.y + 1, 25);
         assert!(first.contains("one"));
-        assert_eq!(second, "   pi");
+        assert_eq!(second, "▐  pi");
         assert!(!first.contains("working"));
         assert!(!second.contains("working"));
 
