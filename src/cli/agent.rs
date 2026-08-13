@@ -543,16 +543,26 @@ fn wait_for_named_agent(
             )))
         } else if agent["name"].as_str() != Some(name) {
             Some(Err(agent_name_lost_error("cli:agent:start", name)))
-        } else if agent["interactive_ready"].as_bool().unwrap_or(false) {
-            Some(Ok(agent.clone()))
-        } else if !agent["launch_pending"].as_bool().unwrap_or(false) {
-            Some(Err(cli_agent_error(
-                "cli:agent:start",
-                "agent_start_failed",
-                "agent process exited before becoming interactive",
-            )))
         } else {
-            None
+            match agent["agent_status"].as_str() {
+                Some("blocked") => Some(Err(cli_agent_error(
+                    "cli:agent:start",
+                    "agent_not_ready",
+                    format!("agent {name} is blocked during startup and is not ready for prompts"),
+                ))),
+                Some("working" | "unknown") => None,
+                Some("idle" | "done") if agent["interactive_ready"].as_bool() == Some(true) => {
+                    Some(Ok(agent.clone()))
+                }
+                Some("idle" | "done") if !agent["launch_pending"].as_bool().unwrap_or(false) => {
+                    Some(Err(cli_agent_error(
+                        "cli:agent:start",
+                        "agent_start_failed",
+                        "agent process exited before becoming interactive",
+                    )))
+                }
+                _ => None,
+            }
         };
         if let Some(outcome) = outcome {
             return Ok(outcome);
@@ -576,6 +586,13 @@ fn print_agent_transport_error(
 ) -> std::io::Result<i32> {
     if super::protocol_mismatch_was_reported(&err) {
         return Ok(1);
+    }
+    // A dead-server marker reaches here from `send_request` in the agent
+    // startup path; surface its deferred response exactly once instead of
+    // printing a second, generic transport-error line.
+    if let Some(response) = super::server_not_running_reported_response(&err) {
+        let value = serde_json::to_value(response).map_err(std::io::Error::other)?;
+        return super::print_response(&value);
     }
     super::print_response(&cli_agent_error(request_id, code, err.to_string()))
 }
