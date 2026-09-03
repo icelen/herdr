@@ -1,13 +1,13 @@
 # Maintaining this fork
 
-This is a personal fork of [ogulcancelik/herdr](https://github.com/ogulcancelik/herdr) that adds a native integration for the Trae (`traex`) CLI, which isn't supported upstream. herdr's agent integrations (Claude, Codex, Cursor, etc.) are hardcoded into the compiled binary — there's no config-level way to add one, so this lives as a small source patch (`Agent::Trae` in `src/detect/mod.rs`, `IntegrationTarget::Trae` wired through `src/integration/*.rs` and `src/cli/integration.rs`) sitting on top of upstream.
+This is a personal fork of [herdrdev/herdr](https://github.com/herdrdev/herdr) that adds a native integration for the Trae (`traex`) CLI, which isn't supported upstream. herdr's agent integrations (Claude, Codex, Cursor, etc.) are hardcoded into the compiled binary — there's no config-level way to add one, so this lives as a small source patch (`Agent::Trae` in `src/detect/mod.rs`, `IntegrationTarget::Trae` wired through `src/integration/*.rs` and `src/cli/integration.rs`) sitting on top of upstream.
 
 Trae is a literal fork of Codex CLI (same `hooks.json` schema, same `[features] hooks = true` config gate), so the integration mirrors `install_codex`, but reports full idle/working/blocked state via hooks (like Kimi/Mastracode) rather than a screen-scrape manifest, since Trae fires the same rich hook event set and has no screen manifest built yet.
 
 ## Remotes
 
 - `origin` → this fork (`git@github.com:icelen/herdr.git`)
-- `upstream` → `https://github.com/ogulcancelik/herdr.git`
+- `upstream` → `https://github.com/herdrdev/herdr.git`
 
 ## Toolchain requirements
 
@@ -72,4 +72,4 @@ herdr integration install trae
 
 ## Going fully upstream
 
-The zero-maintenance alternative is opening this patch as a PR against `ogulcancelik/herdr` instead of hand-merging forever. Not done yet, but the branch is ready for it whenever.
+The zero-maintenance alternative is opening this patch as a PR against `herdrdev/herdr` instead of hand-merging forever. Not done yet, but the branch is ready for it whenever.
