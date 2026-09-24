@@ -11,13 +11,10 @@ Trae is a literal fork of Codex CLI (same `hooks.json` schema, same `[features] 
 
 ## Toolchain requirements
 
-- Rust ≥ 1.88 (some deps require it; homebrew's rust may lag behind — `brew upgrade rust` if `cargo build` complains about `rustc` version).
-- **zig 0.15.2 exactly**, to build the vendored `libghostty-vt` dependency. Homebrew's zig (0.16+) has breaking API changes (`std.Build.Dir.readFileAlloc` signature, etc.) and will fail with a compile error inside `build.zig`. Get the pinned version from ziglang.org if you don't already have it:
-  ```
-  curl -sL -o /tmp/zig.tar.xz "https://ziglang.org/download/0.15.2/zig-aarch64-macos-0.15.2.tar.xz"
-  tar -xf /tmp/zig.tar.xz -C ~/.local/share/
-  ```
-  (swap the URL's arch/OS suffix as needed; use `zig-x86_64-...` etc.)
+- Rust via **rustup** (`brew install rustup`, keg-only: put `/opt/homebrew/opt/rustup/bin` first on `PATH`). rustup honors `rust-toolchain.toml`, so the pinned toolchain and clippy are picked up automatically. Don't use Homebrew's `rust` formula: it's usually newer than the pin, and its clippy flags lints upstream hasn't adopted, so `just ci` fails.
+- **Zig 0.16.0** (upstream bumped from 0.15.2 in v0.9.1; `build.rs` and `vendor/libghostty-vt/build.zig.zon` say which version is required). Homebrew's default formula matches: `brew install zig`. `build.rs` uses `zig` from `PATH` when `ZIG` is unset. When switching zig versions, `rm -rf vendor/libghostty-vt/.zig-cache` first, since it caches the SDK path.
+  - Zig 0.16's built-in HTTP client can fail with `TlsInitializationFailed` when fetching libghostty-vt's packages here, even though `curl` downloads the same URLs fine. Seed zig's package cache by hand: download each URL named in the error with `curl -L -o <file> <url>`, then run `zig fetch <file>` **from inside `vendor/libghostty-vt/`** (0.16 requires a `build.zig` in the working directory). The printed hash should match the one in `build.zig.zon`.
+- `just` and `cargo-nextest` (`brew install just cargo-nextest`). Plain `cargo test` runs everything in one process and can die with SIGPIPE; use nextest.
 
 ## Syncing with upstream
 
@@ -40,9 +37,14 @@ Prefer rebasing instead? `git rebase upstream/master` works too (still just one 
 ## Building and installing
 
 ```sh
-export ZIG=~/.local/share/zig-0.15.2/zig   # adjust path if installed elsewhere
-cargo test
+just ci 'not binary(live_handoff)'   # clippy + nextest + maintenance tests, same filter upstream CI uses on macOS
 ```
+
+If your global git config sets `diff.external` (e.g. difftastic), `scripts/test_release.py` fails because it builds real patches with `git diff`. Run the suite with `GIT_CONFIG_GLOBAL=/dev/null` to isolate it.
+
+Merge gotcha: `Agent::ALL` and `Agent::SCREEN_MANIFEST_AGENTS` in `src/detect/mod.rs` have explicit array lengths. When upstream adds an agent, git merges the entries cleanly but keeps one side's length, so the build fails with "expected an array with a size of N". Set the length to the real count.
+
+`live_handoff` tests are Linux-only (upstream CI excludes them on macOS too); two of them fail on macOS regardless of the Trae patch.
 
 If `generated_protocol_schema_artifact_is_current` fails after a merge, regenerate the snapshot instead of hand-editing it:
 
@@ -53,8 +55,8 @@ HERDR_UPDATE_API_SCHEMA=1 cargo test generated_protocol_schema_artifact_is_curre
 Then build and install:
 
 ```sh
-cargo build --release
-cp target/release/herdr ~/bin/herdr
+cargo build --release --locked
+cp target/release/herdr ~/bin/herdr.new && mv ~/bin/herdr.new ~/bin/herdr   # rename, don't overwrite the running binary in place
 ```
 
 Restarting the server to pick up the new binary disconnects every pane in your current session — do it when that's convenient, not mid-task:
