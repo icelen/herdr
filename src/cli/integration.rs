@@ -179,7 +179,9 @@ fn parse_integration_target(
             IntegrationCommandTarget::Builtin(IntegrationTarget::AntigravityCli)
         }
         "grok" => IntegrationCommandTarget::Builtin(IntegrationTarget::Grok),
-        "trae" | "traex" | "trae-cli" => IntegrationCommandTarget::Builtin(IntegrationTarget::Trae),
+        "trae" | "traex" | "traecli" | "trae-cli" => {
+            IntegrationCommandTarget::Builtin(IntegrationTarget::Trae)
+        }
         _ => {
             eprintln!("unknown integration target: {target}");
             eprintln!(

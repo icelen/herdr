@@ -322,8 +322,35 @@ const GROK_HOOK_ASSET: &str = if cfg!(windows) {
 const GROK_INTEGRATION_VERSION: u32 = 2;
 const TRAE_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
 const TRAE_HOOK_ASSET: &str = include_str!("assets/trae/herdr-agent-state.sh");
-const TRAE_INTEGRATION_VERSION: u32 = 2;
-const TRAE_HOOK_EVENTS: [(&str, &str); 9] = [
+const TRAE_INTEGRATION_VERSION: u32 = 3;
+// Trae no longer runs hooks from the legacy user-level ~/.trae/hooks.json, and
+// only runs plugin hooks it has a trusted hash for. Herdr therefore ships its
+// hooks as a local Trae plugin (installed through the Trae CLI) and records a
+// trust entry per hook in traecli.toml.
+const TRAE_PLUGIN_DIR_NAME: &str = "herdr-plugin";
+const TRAE_PLUGIN_NAME: &str = "herdr";
+const TRAE_PLUGIN_MARKETPLACE: &str = "local";
+const TRAE_HOOK_TIMEOUT_SEC: u64 = 10;
+/// Candidate Trae CLI executables, in lookup order. `HERDR_TRAE_CLI` overrides.
+const TRAE_CLI_ENV_VAR: &str = "HERDR_TRAE_CLI";
+const TRAE_CLI_NAMES: [&str; 3] = ["traex", "traecli", "trae-cli"];
+const TRAE_HOOK_EVENTS: [(&str, &str); 11] = [
+    ("SessionStart", "session"),
+    ("UserPromptSubmit", "working"),
+    ("PreToolUse", "working"),
+    ("PostToolUse", "working"),
+    ("PostToolUseFailure", "working"),
+    ("SubagentStart", "working"),
+    ("PreCompact", "working"),
+    ("PermissionRequest", "blocked"),
+    // The hook script maps notification_type to blocked/idle and ignores others.
+    ("Notification", "notification"),
+    ("Stop", "idle"),
+    ("SessionEnd", "release"),
+];
+/// Entries written to ~/.trae/hooks.json by integration versions 1-2; removed
+/// on install and uninstall.
+const TRAE_LEGACY_HOOK_EVENTS: [(&str, &str); 10] = [
     ("SessionStart", "session"),
     ("UserPromptSubmit", "working"),
     ("PreToolUse", "working"),
@@ -331,10 +358,10 @@ const TRAE_HOOK_EVENTS: [(&str, &str); 9] = [
     ("SubagentStart", "working"),
     ("PreCompact", "working"),
     ("PermissionRequest", "blocked"),
+    ("Notification", "blocked"),
     ("Stop", "idle"),
     ("SessionEnd", "release"),
 ];
-const TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS: [(&str, &str); 1] = [("Notification", "blocked")];
 
 pub(crate) const INSTALL_WARNING_PREFIX: &str = "warning:";
 

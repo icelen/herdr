@@ -2,7 +2,13 @@
 
 This is a personal fork of [herdrdev/herdr](https://github.com/herdrdev/herdr) that adds a native integration for the Trae (`traex`) CLI, which isn't supported upstream. herdr's agent integrations (Claude, Codex, Cursor, etc.) are hardcoded into the compiled binary — there's no config-level way to add one, so this lives as a small source patch (`Agent::Trae` in `src/detect/mod.rs`, `IntegrationTarget::Trae` wired through `src/integration/*.rs` and `src/cli/integration.rs`) sitting on top of upstream.
 
-Trae is a literal fork of Codex CLI (same `hooks.json` schema, same `[features] hooks = true` config gate), so the integration mirrors `install_codex`, but reports full idle/working/blocked state via hooks (like Kimi/Mastracode) rather than a screen-scrape manifest, since Trae fires the same rich hook event set and has no screen manifest built yet.
+Trae is a fork of Codex CLI, but current Trae (traecli 0.207+) no longer runs hooks from the legacy user-level `~/.trae/hooks.json`, and only runs plugin hooks it has a trusted hash for. So `herdr integration install trae` (integration v3):
+
+- writes a local Trae plugin to `~/.trae/herdr-plugin/` (`.codex-plugin/plugin.json`, `hooks.json`, `herdr-agent-state.sh`) and registers it with `traex plugin install --type local … --name herdr` (becomes `herdr@local`; override the CLI with `HERDR_TRAE_CLI`);
+- records one `[hooks.state."herdr@local:hooks.json:<event>:0:0"] trusted_hash = "sha256:…"` per hook in `~/.trae/traecli.toml`. The hash is SHA-256 of the canonical JSON `{"event_name","hooks":[{"async":false,"command","timeout","type"}]}`; golden values Trae accepted live are pinned in `trae_trusted_hash_matches_hashes_trae_accepted`. If Trae changes this scheme, hooks silently stop firing and state falls back to the screen manifest (`src/detect/manifests/trae.toml`);
+- removes the v1-v2 legacy `~/.trae/hooks.json` entries and script.
+
+Hooks report idle/working/blocked (like Kimi/Mastracode); screen detection keeps running alongside as a fallback.
 
 ## Remotes
 

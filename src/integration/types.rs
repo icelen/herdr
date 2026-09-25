@@ -104,9 +104,11 @@ pub(crate) struct MastracodeInstallPaths {
 
 #[derive(Debug)]
 pub(crate) struct TraeInstallPaths {
+    pub plugin_dir: PathBuf,
     pub hook_path: PathBuf,
-    pub hooks_path: PathBuf,
     pub config_path: PathBuf,
+    /// The Trae CLI that registered the plugin (e.g. `traex`).
+    pub cli: String,
 }
 
 #[derive(Debug)]
@@ -301,9 +303,15 @@ pub(crate) struct AntigravityCliUninstallResult {
 
 #[derive(Debug)]
 pub(crate) struct TraeUninstallResult {
-    pub hook_path: PathBuf,
-    pub hooks_path: PathBuf,
+    pub plugin_dir: PathBuf,
     pub config_path: PathBuf,
-    pub removed_hook_file: bool,
-    pub updated_hooks: bool,
+    /// Set when the Trae CLI unregistered the plugin.
+    pub unregistered_plugin: bool,
+    /// Set when herdr trust entries were removed from traecli.toml.
+    pub removed_trust_entries: bool,
+    pub removed_plugin_dir: bool,
+    /// Set when entries or the script from integration versions 1-2 were removed.
+    pub removed_legacy_hooks: bool,
+    /// Why the plugin could not be unregistered, if it was registered.
+    pub unregister_warning: Option<String>,
 }

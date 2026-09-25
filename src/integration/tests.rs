@@ -145,6 +145,7 @@ fn clear_integration_path_env() {
     std::env::remove_var(ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_CONFIG_DIR_ENV_VAR);
     std::env::remove_var(GROK_HOME_ENV_VAR);
+    std::env::remove_var(TRAE_CLI_ENV_VAR);
 }
 
 fn kimi_hook_command(hook_path: &Path, action: &str) -> String {
@@ -4349,86 +4350,6 @@ fn uninstall_mastracode_errors_when_event_value_not_array() {
 }
 
 #[test]
-fn install_trae_writes_hook_and_updates_hooks_and_config() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let home = base.join("home");
-    let trae_dir = home.join(".trae");
-    fs::create_dir_all(&trae_dir).unwrap();
-    fs::write(
-        trae_dir.join("hooks.json"),
-        r#"{"version":1,"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"echo flux"}]}]}}"#,
-    )
-    .unwrap();
-    fs::write(trae_dir.join("traecli.toml"), "model = \"trae-1\"\n").unwrap();
-    std::env::set_var("HOME", &home);
-
-    let installed = install_trae().unwrap();
-    let hook_content = fs::read_to_string(&installed.hook_path).unwrap();
-    let hooks: Value =
-        serde_json::from_str(&fs::read_to_string(&installed.hooks_path).unwrap()).unwrap();
-    let config = fs::read_to_string(&installed.config_path).unwrap();
-
-    assert_eq!(installed.hook_path, trae_dir.join(TRAE_HOOK_INSTALL_NAME));
-    assert_eq!(installed.hooks_path, trae_dir.join("hooks.json"));
-    assert_eq!(installed.config_path, trae_dir.join("traecli.toml"));
-    assert_eq!(hook_content, TRAE_HOOK_ASSET);
-    assert_eq!(hooks["version"], 1);
-    // pre-existing (non-herdr) hook entry must be preserved alongside ours.
-    assert_eq!(hooks["hooks"]["SessionStart"].as_array().unwrap().len(), 2);
-    assert!(hooks["hooks"]["SessionStart"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .any(|group| group["hooks"][0]["command"] == "echo flux"));
-    for (event, action) in TRAE_HOOK_EVENTS {
-        let found = hooks["hooks"][event]
-            .as_array()
-            .unwrap_or_else(|| panic!("missing herdr hook group for {event}"))
-            .iter()
-            .flat_map(|group| group["hooks"].as_array().unwrap().iter())
-            .filter_map(|hook| hook["command"].as_str())
-            .any(|command| command.contains(&format!(" {action}")));
-        assert!(found, "missing herdr hook command for {event} -> {action}");
-    }
-    assert!(config.contains("model = \"trae-1\""));
-    assert!(config.contains("[features]"));
-    assert!(config.contains("hooks = true"));
-
-    std::env::remove_var("HOME");
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn install_trae_is_idempotent_for_hook_entries_and_feature_flag() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let home = base.join("home");
-    let trae_dir = home.join(".trae");
-    fs::create_dir_all(&trae_dir).unwrap();
-    std::env::set_var("HOME", &home);
-
-    install_trae().unwrap();
-    install_trae().unwrap();
-
-    let hooks: Value =
-        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
-    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
-
-    for (event, _action) in TRAE_HOOK_EVENTS {
-        assert_eq!(
-            hooks["hooks"][event].as_array().unwrap().len(),
-            1,
-            "event {event} should have exactly one herdr hook group after reinstalling"
-        );
-    }
-    assert_eq!(config.matches("hooks = true").count(), 1);
-
-    std::env::remove_var("HOME");
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
 fn install_antigravity_cli_writes_hook_and_updates_hooks_json() {
     let _lock = integration_env_lock();
     let base = unique_base();
@@ -4518,62 +4439,6 @@ fn install_antigravity_cli_writes_hook_and_updates_hooks_json() {
 }
 
 #[test]
-fn install_trae_removes_legacy_notification_hook_entry() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let home = base.join("home");
-    let trae_dir = home.join(".trae");
-    fs::create_dir_all(&trae_dir).unwrap();
-    std::env::set_var("HOME", &home);
-
-    let hook_path = trae_dir.join(TRAE_HOOK_INSTALL_NAME);
-    let mut hooks = Map::new();
-    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
-        hooks.insert(
-            event.to_string(),
-            json!([
-                {
-                    "hooks": [{
-                        "type": "command",
-                        "command": hook_command(&hook_path, Some(action)),
-                        "timeout": 10
-                    }]
-                }
-            ]),
-        );
-    }
-    fs::write(
-        trae_dir.join("hooks.json"),
-        serde_json::to_string_pretty(&json!({ "version": 1, "hooks": hooks })).unwrap(),
-    )
-    .unwrap();
-
-    install_trae().unwrap();
-
-    let installed_hooks: Value =
-        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
-    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
-        let legacy_command = hook_command(&hook_path, Some(action));
-        let entries = installed_hooks["hooks"][event].as_array();
-        assert!(
-            entries.is_none_or(|entries| {
-                entries.iter().all(|entry| {
-                    entry["hooks"]
-                        .as_array()
-                        .unwrap()
-                        .iter()
-                        .all(|hook| hook["command"] != json!(legacy_command))
-                })
-            }),
-            "expected legacy {event} -> {action} hook to be removed"
-        );
-    }
-
-    std::env::remove_var("HOME");
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
 fn antigravity_cli_v2_install_is_outdated_until_reinstalled() {
     let _lock = integration_env_lock();
     let base = unique_base();
@@ -4649,36 +4514,6 @@ fn install_antigravity_cli_rewrites_stale_herdr_block() {
         .is_some_and(|command| command != "stale" && command != "stale idle"));
 
     std::env::remove_var(ANTIGRAVITY_CLI_CONFIG_DIR_ENV_VAR);
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
-fn uninstall_trae_removes_herdr_hooks_and_leaves_config_alone() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let home = base.join("home");
-    let trae_dir = home.join(".trae");
-    fs::create_dir_all(&trae_dir).unwrap();
-    std::env::set_var("HOME", &home);
-
-    install_trae().unwrap();
-    let result = uninstall_trae().unwrap();
-    let hooks: Value =
-        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
-    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
-
-    assert!(result.removed_hook_file);
-    assert!(result.updated_hooks);
-    assert!(!result.hook_path.exists());
-    for (event, _action) in TRAE_HOOK_EVENTS {
-        assert!(
-            hooks["hooks"].get(event).is_none(),
-            "event {event} should have no hook entries left"
-        );
-    }
-    assert!(config.contains("hooks = true"));
-
-    std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }
 
@@ -4876,22 +4711,6 @@ fn uninstall_antigravity_cli_removes_hooks_json_entries_and_hook_file() {
 }
 
 #[test]
-fn install_trae_errors_when_config_dir_missing() {
-    let _lock = integration_env_lock();
-    let base = unique_base();
-    let home = base.join("home");
-    fs::create_dir_all(&home).unwrap();
-    std::env::set_var("HOME", &home);
-
-    let err = install_trae().unwrap_err().to_string();
-
-    assert!(err.contains("trae config directory not found"));
-
-    std::env::remove_var("HOME");
-    let _ = fs::remove_dir_all(base);
-}
-
-#[test]
 fn grok_dir_honors_grok_home_after_config_dir_seam() {
     let _lock = integration_env_lock();
     let base = unique_base();
@@ -4920,5 +4739,376 @@ fn grok_dir_honors_grok_home_after_config_dir_seam() {
 
     std::env::remove_var(GROK_HOME_ENV_VAR);
     clear_integration_path_env();
+    let _ = fs::remove_dir_all(base);
+}
+
+/// A stand-in Trae CLI: logs its arguments to `$HOME/trae-cli.log` and edits
+/// traecli.toml the way `plugin install` / `plugin uninstall` do. Exits 3 when
+/// `FAKE_TRAE_FAIL` is set.
+#[cfg(unix)]
+fn install_fake_trae_cli(base: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+
+    let cli = base.join("fake-traex");
+    fs::create_dir_all(base).unwrap();
+    fs::write(
+        &cli,
+        r#"#!/bin/sh
+printf '%s\n' "$*" >> "$HOME/trae-cli.log"
+[ -n "${FAKE_TRAE_FAIL:-}" ] && { echo "boom" >&2; exit 3; }
+config="$HOME/.trae/traecli.toml"
+case "$1 $2" in
+  "plugin install")
+    grep -q '^\[plugins."herdr@local"\]$' "$config" 2>/dev/null \
+      || printf '\n[plugins."herdr@local"]\nenabled = true\n' >> "$config"
+    ;;
+  "plugin uninstall")
+    grep -v -e '^\[plugins."herdr@local"\]$' -e '^enabled = true$' "$config" > "$config.tmp"
+    mv "$config.tmp" "$config"
+    ;;
+esac
+"#,
+    )
+    .unwrap();
+    let mut permissions = fs::metadata(&cli).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&cli, permissions).unwrap();
+    cli
+}
+
+#[cfg(unix)]
+fn setup_trae_home() -> (PathBuf, PathBuf) {
+    let base = unique_base();
+    let home = base.join("home");
+    let trae_dir = home.join(".trae");
+    fs::create_dir_all(&trae_dir).unwrap();
+    std::env::set_var("HOME", &home);
+    std::env::set_var(TRAE_CLI_ENV_VAR, install_fake_trae_cli(&base));
+    (base, trae_dir)
+}
+
+#[cfg(unix)]
+fn teardown_trae_home(base: PathBuf) {
+    std::env::remove_var("HOME");
+    std::env::remove_var(TRAE_CLI_ENV_VAR);
+    std::env::remove_var("FAKE_TRAE_FAIL");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn trae_event_snake_case_matches_trae_trust_keys() {
+    assert_eq!(trae_event_snake_case("SessionStart"), "session_start");
+    assert_eq!(
+        trae_event_snake_case("PostToolUseFailure"),
+        "post_tool_use_failure"
+    );
+    assert_eq!(trae_event_snake_case("Stop"), "stop");
+    assert_eq!(
+        trae_trust_key("UserPromptSubmit"),
+        "herdr@local:hooks.json:user_prompt_submit:0:0"
+    );
+}
+
+#[test]
+fn trae_trusted_hash_matches_hashes_trae_accepted() {
+    // Golden values: Trae 0.207.1 ran these exact plugin hooks once these hashes
+    // were recorded as trusted, and skipped them without.
+    assert_eq!(
+        trae_trusted_hash("SessionStart", "session"),
+        "sha256:6ed0bfd23f74bf34575af4f70403c00f0ed8731f4a5e9b4244c7a8b97ec99bf1"
+    );
+    assert_eq!(
+        trae_trusted_hash("UserPromptSubmit", "working"),
+        "sha256:8015b58cb491868c9c87f8aacde5874a613ea9f74d2b15401b19902860ec5ed3"
+    );
+    assert_eq!(
+        trae_trusted_hash("Stop", "idle"),
+        "sha256:17fe48baa6dea2ec8e6623d19041e2dc864fbe701bc069629e527d6364ba99c0"
+    );
+}
+
+#[test]
+fn trae_trust_entries_replace_stale_herdr_tables_and_keep_others() {
+    let config = "model = \"m\"\n\n[hooks.state.\"herdr@local:hooks.json:old_event:0:0\"]\ntrusted_hash = \"sha256:stale\"\n\n[hooks.state.\"other@x:hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:keep\"\n";
+
+    let updated = with_trae_trust_entries(config);
+    let parsed: toml::Value = toml::from_str(&updated).unwrap();
+    let state = parsed["hooks"]["state"].as_table().unwrap();
+
+    assert!(!state.contains_key("herdr@local:hooks.json:old_event:0:0"));
+    assert_eq!(
+        state["other@x:hooks.json:stop:0:0"]["trusted_hash"].as_str(),
+        Some("sha256:keep")
+    );
+    for (event, action) in TRAE_HOOK_EVENTS {
+        assert_eq!(
+            state[&trae_trust_key(event)]["trusted_hash"].as_str(),
+            Some(trae_trusted_hash(event, action).as_str()),
+            "missing trust entry for {event}"
+        );
+    }
+    assert_eq!(with_trae_trust_entries(&updated), updated, "idempotent");
+    assert_eq!(
+        without_trae_trust_entries(&updated),
+        "model = \"m\"\n\n[hooks.state.\"other@x:hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:keep\"\n"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn install_trae_registers_plugin_and_trusts_its_hooks() {
+    let _lock = integration_env_lock();
+    let (base, trae_dir) = setup_trae_home();
+    fs::write(trae_dir.join("traecli.toml"), "model = \"trae-1\"\n").unwrap();
+
+    let installed = install_trae().unwrap();
+
+    let plugin_dir = trae_dir.join(TRAE_PLUGIN_DIR_NAME);
+    assert_eq!(installed.plugin_dir, plugin_dir);
+    assert_eq!(installed.hook_path, plugin_dir.join(TRAE_HOOK_INSTALL_NAME));
+    assert_eq!(
+        fs::read_to_string(&installed.hook_path).unwrap(),
+        TRAE_HOOK_ASSET
+    );
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(plugin_dir.join("hooks.json")).unwrap()).unwrap();
+    assert_eq!(hooks, trae_plugin_hooks());
+    for (event, action) in TRAE_HOOK_EVENTS {
+        assert_eq!(
+            hooks["hooks"][event][0]["hooks"][0]["command"],
+            json!(format!(
+                "sh \"__PLUGIN_DIR__/herdr-agent-state.sh\" {action}"
+            )),
+        );
+    }
+    let manifest: Value = serde_json::from_str(
+        &fs::read_to_string(plugin_dir.join(".codex-plugin").join("plugin.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(manifest["name"], "herdr");
+    assert_eq!(manifest["hooks"], "./hooks.json");
+
+    let log = fs::read_to_string(base.join("home").join("trae-cli.log")).unwrap();
+    assert_eq!(
+        log.trim(),
+        format!(
+            "plugin install --type local {} --name herdr --yes",
+            plugin_dir.display()
+        )
+    );
+
+    let config = fs::read_to_string(&installed.config_path).unwrap();
+    let parsed: toml::Value = toml::from_str(&config).unwrap();
+    assert_eq!(parsed["model"].as_str(), Some("trae-1"));
+    assert_eq!(parsed["features"]["hooks"].as_bool(), Some(true));
+    assert!(parsed["plugins"]["herdr@local"].is_table());
+    for (event, action) in TRAE_HOOK_EVENTS {
+        assert_eq!(
+            parsed["hooks"]["state"][&trae_trust_key(event)]["trusted_hash"].as_str(),
+            Some(trae_trusted_hash(event, action).as_str())
+        );
+    }
+
+    let status = installed_integration_statuses()
+        .into_iter()
+        .find(|status| status.target == crate::api::schema::IntegrationTarget::Trae)
+        .expect("trae integration status");
+    assert_eq!(status.state, IntegrationStatusKind::Current);
+
+    teardown_trae_home(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn install_trae_is_idempotent() {
+    let _lock = integration_env_lock();
+    let (base, trae_dir) = setup_trae_home();
+
+    install_trae().unwrap();
+    let first = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
+    install_trae().unwrap();
+    let second = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
+
+    assert_eq!(first, second);
+    assert_eq!(second.matches("hooks = true").count(), 1);
+    for (event, _action) in TRAE_HOOK_EVENTS {
+        assert_eq!(
+            second
+                .matches(&format!("[hooks.state.\"{}\"]", trae_trust_key(event)))
+                .count(),
+            1
+        );
+    }
+
+    teardown_trae_home(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn install_trae_migrates_legacy_user_hooks() {
+    let _lock = integration_env_lock();
+    let (base, trae_dir) = setup_trae_home();
+    let legacy_hook_path = trae_dir.join(TRAE_HOOK_INSTALL_NAME);
+    fs::write(&legacy_hook_path, "# old herdr hook\n").unwrap();
+    let mut legacy_hooks = Map::new();
+    for (event, action) in TRAE_LEGACY_HOOK_EVENTS {
+        legacy_hooks.insert(
+            event.to_string(),
+            json!([{
+                "hooks": [{
+                    "type": "command",
+                    "command": hook_command(&legacy_hook_path, Some(action)),
+                    "timeout": 10
+                }]
+            }]),
+        );
+    }
+    legacy_hooks
+        .get_mut("SessionStart")
+        .unwrap()
+        .as_array_mut()
+        .unwrap()
+        .push(json!({"hooks": [{"type": "command", "command": "echo keep-me"}]}));
+    fs::write(
+        trae_dir.join("hooks.json"),
+        serde_json::to_string_pretty(&json!({"version": 1, "hooks": legacy_hooks})).unwrap(),
+    )
+    .unwrap();
+
+    install_trae().unwrap();
+
+    assert!(!legacy_hook_path.exists(), "legacy script must be removed");
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(trae_dir.join("hooks.json")).unwrap()).unwrap();
+    let serialized = hooks.to_string();
+    assert!(
+        !serialized.contains(TRAE_HOOK_INSTALL_NAME),
+        "legacy herdr entries must be removed: {serialized}"
+    );
+    assert!(serialized.contains("echo keep-me"));
+
+    teardown_trae_home(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn install_trae_fails_without_trusting_hooks_when_plugin_install_fails() {
+    let _lock = integration_env_lock();
+    let (base, trae_dir) = setup_trae_home();
+    std::env::set_var("FAKE_TRAE_FAIL", "1");
+
+    let err = install_trae().unwrap_err().to_string();
+
+    assert!(err.contains("plugin install` failed"), "{err}");
+    assert!(err.contains("boom"), "{err}");
+    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap_or_default();
+    assert!(!config.contains("herdr@local:hooks.json"));
+
+    teardown_trae_home(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn uninstall_trae_unregisters_plugin_and_removes_trust() {
+    let _lock = integration_env_lock();
+    let (base, trae_dir) = setup_trae_home();
+    fs::write(
+        trae_dir.join("traecli.toml"),
+        "[hooks.state.\"other@x:hooks.json:stop:0:0\"]\ntrusted_hash = \"sha256:keep\"\n",
+    )
+    .unwrap();
+
+    install_trae().unwrap();
+    let result = uninstall_trae().unwrap();
+
+    assert!(result.unregistered_plugin);
+    assert!(result.unregister_warning.is_none());
+    assert!(result.removed_trust_entries);
+    assert!(result.removed_plugin_dir);
+    assert!(!trae_dir.join(TRAE_PLUGIN_DIR_NAME).exists());
+    let log = fs::read_to_string(base.join("home").join("trae-cli.log")).unwrap();
+    assert_eq!(log.lines().last(), Some("plugin uninstall herdr@local"));
+    let config = fs::read_to_string(trae_dir.join("traecli.toml")).unwrap();
+    assert!(!config.contains("herdr@local"), "{config}");
+    assert!(config.contains("sha256:keep"));
+    assert!(config.contains("hooks = true"));
+
+    teardown_trae_home(base);
+}
+
+#[cfg(unix)]
+#[test]
+fn trae_hook_script_maps_notification_types() {
+    use std::io::{BufRead, BufReader, Write};
+    use std::os::unix::net::UnixListener;
+    use std::process::{Command, Stdio};
+
+    let base = std::env::temp_dir().join(format!("hts-{}", std::process::id()));
+    fs::create_dir_all(&base).unwrap();
+    let script = base.join(TRAE_HOOK_INSTALL_NAME);
+    fs::write(&script, TRAE_HOOK_ASSET).unwrap();
+    let socket = base.join("s.sock");
+
+    let run = |notification_type: &str| -> Option<Value> {
+        let _ = fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut child = Command::new("sh")
+            .arg(&script)
+            .arg("notification")
+            .env("HERDR_ENV", "1")
+            .env("HERDR_PANE_ID", "w1:p1")
+            .env("HERDR_SOCKET_PATH", &socket)
+            .stdin(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child
+            .stdin
+            .take()
+            .unwrap()
+            .write_all(
+                json!({"session_id": "s1", "notification_type": notification_type})
+                    .to_string()
+                    .as_bytes(),
+            )
+            .unwrap();
+        assert!(child.wait().unwrap().success());
+        let (stream, _) = listener.accept().ok()?;
+        stream.set_nonblocking(false).unwrap();
+        let mut line = String::new();
+        BufReader::new(stream).read_line(&mut line).unwrap();
+        Some(serde_json::from_str(&line).unwrap())
+    };
+
+    let blocked = run("permission_prompt").expect("permission prompt reports");
+    assert_eq!(blocked["method"], "pane.report_agent");
+    assert_eq!(blocked["params"]["state"], "blocked");
+    assert_eq!(blocked["params"]["agent"], "trae");
+    assert_eq!(
+        run("elicitation_dialog").expect("elicitation reports")["params"]["state"],
+        "blocked"
+    );
+    assert_eq!(
+        run("idle_prompt").expect("idle prompt reports")["params"]["state"],
+        "idle"
+    );
+    assert!(run("auth_success").is_none(), "other types are ignored");
+
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
+fn install_trae_errors_when_config_dir_missing() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    fs::create_dir_all(&home).unwrap();
+    std::env::set_var("HOME", &home);
+
+    let err = install_trae().unwrap_err().to_string();
+
+    assert!(err.contains("trae config directory not found"));
+
+    std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
 }

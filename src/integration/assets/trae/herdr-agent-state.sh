@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=trae
-# HERDR_INTEGRATION_VERSION=2
+# HERDR_INTEGRATION_VERSION=3
 
 set -eu
 
@@ -13,7 +13,7 @@ trap 'rm -f "$hook_input_file"' EXIT HUP INT TERM
 cat >"$hook_input_file" 2>/dev/null || true
 
 case "$action" in
-  session|working|blocked|idle|release) ;;
+  session|working|blocked|idle|release|notification) ;;
   *) exit 0 ;;
 esac
 
@@ -51,6 +51,17 @@ if hook_input_file:
 
 session_id = hook_input.get("session_id")
 agent_session_id = session_id if isinstance(session_id, str) and session_id else None
+if action == "notification":
+    # Only notifications that mean "waiting on the user" change state; other
+    # notification types (e.g. informational) are ignored.
+    notification_type = str(hook_input.get("notification_type") or "").lower()
+    if notification_type in ("permission_prompt", "elicitation_dialog"):
+        action = "blocked"
+    elif notification_type == "idle_prompt":
+        action = "idle"
+    else:
+        raise SystemExit(0)
+
 request_id = f"{source}:{int(time.time() * 1000)}:{random.randrange(1_000_000):06d}"
 report_seq = time.time_ns()
 

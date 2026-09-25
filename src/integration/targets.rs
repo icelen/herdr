@@ -63,8 +63,9 @@ use super::{
     OPENCODE_PLUGIN_INSTALL_NAME, OPENCODE_TUI_PLUGIN_ASSET, OPENCODE_TUI_PLUGIN_INSTALL_NAME,
     OPENCODE_TUI_PLUGIN_SPEC, PI_EXTENSION_ASSET, PI_EXTENSION_INSTALL_NAME, QODERCLI_HOOK_ASSET,
     QODERCLI_HOOK_EVENTS, QODERCLI_HOOK_INSTALL_NAME, QODERCLI_REMOVED_LIFECYCLE_HOOK_EVENTS,
-    QWEN_HOOK_ASSET, QWEN_HOOK_EVENTS, QWEN_HOOK_INSTALL_NAME, TRAE_HOOK_ASSET, TRAE_HOOK_EVENTS,
-    TRAE_HOOK_INSTALL_NAME, TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS,
+    QWEN_HOOK_ASSET, QWEN_HOOK_EVENTS, QWEN_HOOK_INSTALL_NAME, TRAE_CLI_ENV_VAR, TRAE_CLI_NAMES,
+    TRAE_HOOK_ASSET, TRAE_HOOK_EVENTS, TRAE_HOOK_INSTALL_NAME, TRAE_HOOK_TIMEOUT_SEC,
+    TRAE_LEGACY_HOOK_EVENTS, TRAE_PLUGIN_DIR_NAME, TRAE_PLUGIN_MARKETPLACE, TRAE_PLUGIN_NAME,
 };
 
 fn ensure_extension_dir(dir: &Path, agent: &str) -> io::Result<()> {
@@ -1788,114 +1789,342 @@ pub(crate) fn install_trae() -> io::Result<TraeInstallPaths> {
         )));
     }
 
-    let hook_path = dir.join(TRAE_HOOK_INSTALL_NAME);
+    remove_trae_legacy_hooks(&dir)?;
+
+    let plugin_dir = dir.join(TRAE_PLUGIN_DIR_NAME);
+    let manifest_dir = plugin_dir.join(".codex-plugin");
+    fs::create_dir_all(&manifest_dir)?;
+    let hook_path = plugin_dir.join(TRAE_HOOK_INSTALL_NAME);
     fs::write(&hook_path, TRAE_HOOK_ASSET)?;
     make_executable(&hook_path)?;
-
-    let hooks_path = dir.join("hooks.json");
-    let mut hooks_file = if hooks_path.is_file() {
-        serde_json::from_str::<Value>(&fs::read_to_string(&hooks_path)?).map_err(|err| {
-            io::Error::other(format!("failed to parse {}: {err}", hooks_path.display()))
-        })?
-    } else {
-        json!({ "version": 1 })
-    };
-
-    if hooks_file.get("version").is_none() {
-        hooks_file
-            .as_object_mut()
-            .ok_or_else(|| {
-                io::Error::other(format!(
-                    "trae hooks file at {} must be a JSON object",
-                    hooks_path.display()
-                ))
-            })?
-            .insert("version".to_string(), json!(1));
-    }
-
-    let hooks = ensure_hooks_object(
-        &mut hooks_file,
-        &hooks_path,
-        "trae hooks file",
-        "trae hooks file hooks",
+    fs::write(
+        plugin_dir.join("hooks.json"),
+        serde_json::to_string_pretty(&trae_plugin_hooks())?,
     )?;
-    for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
-        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-    }
-    for (event, action) in TRAE_HOOK_EVENTS {
-        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-    }
-    for (event, action) in TRAE_HOOK_EVENTS {
-        ensure_command_hook(
-            hooks,
-            event,
-            hook_command(&hook_path, Some(action)),
-            10,
-            None,
-        )?;
-    }
-    remove_legacy_bash_hook_file(&hook_path)?;
+    fs::write(
+        manifest_dir.join("plugin.json"),
+        serde_json::to_string_pretty(&json!({
+            "name": TRAE_PLUGIN_NAME,
+            "version": format!("{}.0.0", super::TRAE_INTEGRATION_VERSION),
+            "description": "Report Trae agent state to herdr",
+            "hooks": "./hooks.json",
+            "interface": {
+                "displayName": "herdr",
+                "shortDescription": "Report Trae agent state to herdr",
+                "category": "Developer Tools"
+            }
+        }))?,
+    )?;
 
-    fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+    // Reinstalling the same local plugin refreshes Trae's cached copy.
+    let plugin_dir_arg = plugin_dir.to_string_lossy().into_owned();
+    let (cli, output) = run_trae_cli(&[
+        "plugin",
+        "install",
+        "--type",
+        "local",
+        &plugin_dir_arg,
+        "--name",
+        TRAE_PLUGIN_NAME,
+        "--yes",
+    ])?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "`{cli} plugin install` failed: {}",
+            command_output_summary(&output)
+        )));
+    }
 
+    // Trae skips plugin hooks without a trusted hash, so record one per hook.
     let config_path = dir.join("traecli.toml");
     let existing_config = if config_path.is_file() {
         fs::read_to_string(&config_path)?
     } else {
         String::new()
     };
-    let new_config = build_codex_config_with_hooks(&existing_config);
+    let new_config = with_trae_trust_entries(&build_codex_config_with_hooks(&existing_config));
+    toml::from_str::<toml::Value>(&new_config).map_err(|err| {
+        io::Error::other(format!(
+            "refusing to write {}: result would not be valid TOML: {err}",
+            config_path.display()
+        ))
+    })?;
     if new_config != existing_config {
         fs::write(&config_path, new_config)?;
     }
 
     Ok(TraeInstallPaths {
+        plugin_dir,
         hook_path,
-        hooks_path,
         config_path,
+        cli,
     })
 }
 
 pub(crate) fn uninstall_trae() -> io::Result<TraeUninstallResult> {
-    let trae_dir = trae_dir()?;
-    let hook_path = trae_dir.join(TRAE_HOOK_INSTALL_NAME);
-    let hooks_path = trae_dir.join("hooks.json");
-    let config_path = trae_dir.join("traecli.toml");
-    let mut updated_hooks = false;
+    let dir = trae_dir()?;
+    let plugin_dir = dir.join(TRAE_PLUGIN_DIR_NAME);
+    let config_path = dir.join("traecli.toml");
+    let read_config = || -> io::Result<String> {
+        if config_path.is_file() {
+            fs::read_to_string(&config_path)
+        } else {
+            Ok(String::new())
+        }
+    };
+
+    let mut unregistered_plugin = false;
+    let mut unregister_warning = None;
+    let plugin_table = format!("[plugins.\"{}\"]", trae_plugin_id());
+    if read_config()?
+        .lines()
+        .any(|line| line.trim() == plugin_table)
+    {
+        match run_trae_cli(&["plugin", "uninstall", &trae_plugin_id()]) {
+            Ok((_, output)) if output.status.success() => unregistered_plugin = true,
+            Ok((cli, output)) => {
+                unregister_warning = Some(format!(
+                    "`{cli} plugin uninstall {}` failed: {}",
+                    trae_plugin_id(),
+                    command_output_summary(&output)
+                ));
+            }
+            Err(err) => unregister_warning = Some(err.to_string()),
+        }
+    }
+
+    let existing_config = read_config()?;
+    let stripped_config = without_trae_trust_entries(&existing_config);
+    let removed_trust_entries = stripped_config != existing_config;
+    if removed_trust_entries {
+        fs::write(&config_path, stripped_config)?;
+    }
+
+    let removed_plugin_dir = remove_dir_all_if_exists(&plugin_dir)?;
+    let removed_legacy_hooks = remove_trae_legacy_hooks(&dir)?;
+
+    Ok(TraeUninstallResult {
+        plugin_dir,
+        config_path,
+        unregistered_plugin,
+        removed_trust_entries,
+        removed_plugin_dir,
+        removed_legacy_hooks,
+        unregister_warning,
+    })
+}
+
+fn trae_plugin_id() -> String {
+    format!("{TRAE_PLUGIN_NAME}@{TRAE_PLUGIN_MARKETPLACE}")
+}
+
+/// The command Trae runs for one hook. `__PLUGIN_DIR__` is expanded by Trae to
+/// the installed plugin root.
+pub(super) fn trae_plugin_hook_command(action: &str) -> String {
+    format!("sh \"__PLUGIN_DIR__/{TRAE_HOOK_INSTALL_NAME}\" {action}")
+}
+
+pub(super) fn trae_plugin_hooks() -> Value {
+    let mut hooks = Map::new();
+    for (event, action) in TRAE_HOOK_EVENTS {
+        hooks.insert(
+            event.to_string(),
+            json!([{
+                "hooks": [{
+                    "type": "command",
+                    "command": trae_plugin_hook_command(action),
+                    "timeout": TRAE_HOOK_TIMEOUT_SEC
+                }]
+            }]),
+        );
+    }
+    json!({ "hooks": hooks })
+}
+
+/// `PostToolUseFailure` -> `post_tool_use_failure`, the event name Trae uses in
+/// hook trust keys.
+pub(super) fn trae_event_snake_case(event: &str) -> String {
+    let mut snake = String::with_capacity(event.len() + 4);
+    for (index, ch) in event.chars().enumerate() {
+        if ch.is_ascii_uppercase() {
+            if index > 0 {
+                snake.push('_');
+            }
+            snake.push(ch.to_ascii_lowercase());
+        } else {
+            snake.push(ch);
+        }
+    }
+    snake
+}
+
+pub(super) fn trae_trust_key(event: &str) -> String {
+    format!(
+        "{}:hooks.json:{}:0:0",
+        trae_plugin_id(),
+        trae_event_snake_case(event)
+    )
+}
+
+/// Trae trusts a hook by the SHA-256 of a canonical (sorted-key, compact) JSON
+/// identity of its event and handler. Verified against hashes Trae itself
+/// recorded for marketplace plugins.
+pub(super) fn trae_trusted_hash(event: &str, action: &str) -> String {
+    use sha2::{Digest, Sha256};
+
+    // Keys are inserted in sorted order so the encoding is canonical whether or
+    // not serde_json preserves insertion order.
+    let mut handler = Map::new();
+    handler.insert("async".to_string(), json!(false));
+    handler.insert(
+        "command".to_string(),
+        json!(trae_plugin_hook_command(action)),
+    );
+    handler.insert("timeout".to_string(), json!(TRAE_HOOK_TIMEOUT_SEC));
+    handler.insert("type".to_string(), json!("command"));
+    let mut identity = Map::new();
+    identity.insert(
+        "event_name".to_string(),
+        json!(trae_event_snake_case(event)),
+    );
+    identity.insert("hooks".to_string(), json!([Value::Object(handler)]));
+
+    let digest = Sha256::digest(Value::Object(identity).to_string().as_bytes());
+    let hex: String = digest.iter().map(|byte| format!("{byte:02x}")).collect();
+    format!("sha256:{hex}")
+}
+
+fn is_trae_trust_header(line: &str) -> bool {
+    line.trim()
+        .starts_with(&format!("[hooks.state.\"{}:", trae_plugin_id()))
+}
+
+/// Removes every herdr hook trust table, leaving the rest of the file as-is.
+pub(super) fn without_trae_trust_entries(config: &str) -> String {
+    let mut kept: Vec<&str> = Vec::new();
+    let mut skipping = false;
+    for line in config.lines() {
+        if is_trae_trust_header(line) {
+            skipping = true;
+            continue;
+        }
+        if skipping && line.trim_start().starts_with('[') {
+            skipping = false;
+        }
+        if !skipping {
+            kept.push(line);
+        }
+    }
+    let body = kept.join("\n");
+    let body = body.trim_end();
+    if body.is_empty() {
+        String::new()
+    } else {
+        format!("{body}\n")
+    }
+}
+
+pub(super) fn with_trae_trust_entries(config: &str) -> String {
+    let mut out = without_trae_trust_entries(config);
+    for (event, action) in TRAE_HOOK_EVENTS {
+        if !out.is_empty() {
+            out.push('\n');
+        }
+        out.push_str(&format!(
+            "[hooks.state.\"{}\"]\ntrusted_hash = \"{}\"\n",
+            trae_trust_key(event),
+            trae_trusted_hash(event, action)
+        ));
+    }
+    out
+}
+
+/// Runs the Trae CLI (`HERDR_TRAE_CLI`, else the first of traex/traecli/trae-cli
+/// found on PATH or in ~/.local/bin). Returns the program used and its output.
+fn run_trae_cli(args: &[&str]) -> io::Result<(String, std::process::Output)> {
+    let mut candidates: Vec<String> = Vec::new();
+    if let Some(cli) = std::env::var_os(TRAE_CLI_ENV_VAR).filter(|value| !value.is_empty()) {
+        candidates.push(cli.to_string_lossy().into_owned());
+    } else {
+        candidates.extend(TRAE_CLI_NAMES.iter().map(|name| name.to_string()));
+        if let Ok(home) = super::env::home_dir() {
+            candidates.extend(TRAE_CLI_NAMES.iter().map(|name| {
+                home.join(".local")
+                    .join("bin")
+                    .join(name)
+                    .to_string_lossy()
+                    .into_owned()
+            }));
+        }
+    }
+
+    for candidate in &candidates {
+        match crate::noninteractive_process::command(candidate)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .output()
+        {
+            Ok(output) => return Ok((candidate.clone(), output)),
+            Err(err) if err.kind() == io::ErrorKind::NotFound => continue,
+            Err(err) => {
+                return Err(io::Error::other(format!(
+                    "failed to run {candidate}: {err}"
+                )))
+            }
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::NotFound,
+        format!(
+            "trae cli not found (looked for {}); install trae first or set {TRAE_CLI_ENV_VAR}",
+            TRAE_CLI_NAMES.join(", ")
+        ),
+    ))
+}
+
+fn command_output_summary(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let text = if stderr.trim().is_empty() {
+        stdout.trim()
+    } else {
+        stderr.trim()
+    };
+    let tail: Vec<&str> = text.lines().rev().take(5).collect();
+    let tail: Vec<&str> = tail.into_iter().rev().collect();
+    format!("{} ({})", tail.join(" | "), output.status)
+}
+
+/// Removes what integration versions 1-2 installed: herdr entries in the
+/// legacy ~/.trae/hooks.json and the ~/.trae/herdr-agent-state.sh script.
+fn remove_trae_legacy_hooks(dir: &Path) -> io::Result<bool> {
+    let legacy_hook_path = dir.join(TRAE_HOOK_INSTALL_NAME);
+    let hooks_path = dir.join("hooks.json");
+    let mut removed = false;
 
     if hooks_path.is_file() {
         let mut hooks_file = serde_json::from_str::<Value>(&fs::read_to_string(&hooks_path)?)
             .map_err(|err| {
                 io::Error::other(format!("failed to parse {}: {err}", hooks_path.display()))
             })?;
-
+        let mut updated = false;
         if let Some(hooks) = hooks_object_if_present(
             &mut hooks_file,
             &hooks_path,
             "trae hooks file",
             "trae hooks file hooks",
         )? {
-            for (event, action) in TRAE_REMOVED_LIFECYCLE_HOOK_EVENTS {
-                updated_hooks |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-            }
-            for (event, action) in TRAE_HOOK_EVENTS {
-                updated_hooks |= remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+            for (event, action) in TRAE_LEGACY_HOOK_EVENTS {
+                updated |= remove_hook_commands(hooks, event, &legacy_hook_path, Some(action))?;
             }
         }
-
-        if updated_hooks {
+        if updated {
             fs::write(&hooks_path, serde_json::to_string_pretty(&hooks_file)?)?;
+            removed = true;
         }
     }
 
-    let removed_hook_file =
-        remove_file_if_exists(&hook_path)? | remove_legacy_bash_hook_file(&hook_path)?;
-
-    Ok(TraeUninstallResult {
-        hook_path,
-        hooks_path,
-        config_path,
-        removed_hook_file,
-        updated_hooks,
-    })
+    removed |= remove_file_if_exists(&legacy_hook_path)?;
+    removed |= remove_legacy_bash_hook_file(&legacy_hook_path)?;
+    Ok(removed)
 }

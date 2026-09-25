@@ -226,7 +226,7 @@ fn lookup_agent(name: &str) -> Option<Agent> {
         "qwen" | "qwen-code" | "qwen code" => Some(Agent::Qwen),
         "letta" | "letta-code" | "letta code" => Some(Agent::Letta),
         "maki" => Some(Agent::Maki),
-        "trae" | "traex" | "trae-cli" => Some(Agent::Trae),
+        "trae" | "traex" | "traecli" | "trae-cli" => Some(Agent::Trae),
         "muse" | "muse-code" | "muse-cli" => Some(Agent::Muse),
         _ if is_muse_versioned_binary(name) => Some(Agent::Muse),
         _ => None,
@@ -985,6 +985,8 @@ mod tests {
         assert_eq!(parse_agent_label("letta-code"), Some(Agent::Letta));
         assert_eq!(parse_agent_label("maki"), Some(Agent::Maki));
         assert_eq!(parse_agent_label("kilo-code"), Some(Agent::Kilo));
+        assert_eq!(parse_agent_label("traex"), Some(Agent::Trae));
+        assert_eq!(parse_agent_label("traecli"), Some(Agent::Trae));
     }
 
     #[test]

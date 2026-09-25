@@ -56,7 +56,7 @@ pub(crate) fn integration_target_command_names(
         crate::api::schema::IntegrationTarget::Mastracode => &["mastracode"],
         crate::api::schema::IntegrationTarget::AntigravityCli => &["agy"],
         crate::api::schema::IntegrationTarget::Grok => &["grok"],
-        crate::api::schema::IntegrationTarget::Trae => &["trae", "traex", "trae-cli"],
+        crate::api::schema::IntegrationTarget::Trae => &["trae", "traex", "traecli", "trae-cli"],
     }
 }
 
@@ -364,7 +364,10 @@ fn integration_specs() -> [(
         ),
         (
             crate::api::schema::IntegrationTarget::Trae,
-            trae_dir().map(|dir| dir.join(super::TRAE_HOOK_INSTALL_NAME)),
+            trae_dir().map(|dir| {
+                dir.join(super::TRAE_PLUGIN_DIR_NAME)
+                    .join(super::TRAE_HOOK_INSTALL_NAME)
+            }),
             super::TRAE_INTEGRATION_VERSION,
         ),
     ]

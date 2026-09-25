@@ -319,11 +319,19 @@ fn install_target_inner(target: crate::api::schema::IntegrationTarget) -> io::Re
             let installed = install_trae()?;
             vec![
                 format!(
-                    "installed trae integration hook to {}",
+                    "registered herdr trae plugin from {} with {}",
+                    installed.plugin_dir.display(),
+                    installed.cli
+                ),
+                format!(
+                    "installed trae hook script to {}",
                     installed.hook_path.display()
                 ),
-                format!("ensured trae hooks at {}", installed.hooks_path.display()),
-                format!("ensured trae config at {}", installed.config_path.display()),
+                format!(
+                    "trusted herdr trae hooks in {}",
+                    installed.config_path.display()
+                ),
+                "restart running trae sessions to load the hooks".to_string(),
             ]
         }
     };
@@ -782,32 +790,33 @@ pub(crate) fn uninstall_target(
         crate::api::schema::IntegrationTarget::Trae => {
             let result = uninstall_trae()?;
             let mut messages = Vec::new();
-            if result.removed_hook_file {
+            if result.unregistered_plugin {
+                messages.push("unregistered herdr trae plugin".to_string());
+            }
+            if let Some(warning) = result.unregister_warning {
                 messages.push(format!(
-                    "removed trae hook at {}",
-                    result.hook_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no trae hook found at {}",
-                    result.hook_path.display()
+                    "{} could not unregister herdr trae plugin: {warning}",
+                    super::INSTALL_WARNING_PREFIX
                 ));
             }
-            if result.updated_hooks {
+            if result.removed_trust_entries {
                 messages.push(format!(
-                    "removed herdr trae hook entries from {}",
-                    result.hooks_path.display()
-                ));
-            } else {
-                messages.push(format!(
-                    "no herdr trae hook entries found in {}",
-                    result.hooks_path.display()
+                    "removed herdr trae hook trust entries from {}",
+                    result.config_path.display()
                 ));
             }
-            messages.push(format!(
-                "left trae config unchanged at {}",
-                result.config_path.display()
-            ));
+            if result.removed_plugin_dir {
+                messages.push(format!(
+                    "removed herdr trae plugin files at {}",
+                    result.plugin_dir.display()
+                ));
+            }
+            if result.removed_legacy_hooks {
+                messages.push("removed legacy herdr trae hooks".to_string());
+            }
+            if messages.is_empty() {
+                messages.push("no herdr trae integration found".to_string());
+            }
             messages
         }
     };
