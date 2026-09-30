@@ -10,6 +10,27 @@ Trae is a fork of Codex CLI, but current Trae (traecli 0.207+) no longer runs ho
 
 Hooks report idle/working/blocked (like Kimi/Mastracode); screen detection keeps running alongside as a fallback.
 
+Trae is also registered as an official resume source in `src/agent_resume.rs` (`is_official_agent_source`, `plan`, `persisted_session_from_launch_args`): the session id the hook reports on `SessionStart` is kept, and Herdr restores the pane with `traex resume <id>`. Being official also means Herdr ignores the hook's `release` report and ends the Trae session when the `traex` process exits, like its built-in integrations.
+
+Like Codex, traex can run sessions on a shared app-server daemon (`traex dashboard`; `daemon_auto_start` is off by default, so only when a daemon is already running). The daemon runs every session's hooks with the environment of the pane that started it, so the hook (integration v4) exits when `traex app-server` is among its three nearest ancestor processes. Both the Codex and Trae guards use `ps -ww`: without it macOS truncates long command lines, and the daemon's ` app-server` sits after a long install path.
+
+## Codex idle detection
+
+Upstream (v0.9.1, #4563) stopped inferring Codex `idle` from the screen, so finished Codex panes stay `unknown` and sort last. The fork adds two rules to `src/detect/manifests/codex.toml` (mirrored in `distribution/agent-detection/codex.toml`) that read Codex's `run-state` terminal-title item: `Ready` → idle, `Working`/`Thinking` → working. `Action Required` → blocked is upstream's. The title comes from the Codex TUI in each pane, so it works with Codex's shared app-server daemon (`codex agents`, `codex queue`).
+
+Upstream v0.9.3 (#4756) also reports Codex `working`/`idle` from hooks, but only reliably with `codex --no-daemon`: the shared daemon runs every session's hooks with the environment of the pane that started it, so `HERDR_PANE_ID` points at the wrong pane. The fork's `src/integration/assets/codex/herdr-agent-state.sh` exits when its parent process is `codex app-server` (checked with `ps -ww`), so daemon sessions rely on the title rules instead (the Windows `.ps1` hook has no such guard). The guard doesn't bump `CODEX_INTEGRATION_VERSION`, to avoid colliding with a future upstream version; reinstall the Codex integration after changing the script.
+
+It needs `run-state` in `~/.codex/config.toml`. Without it Codex falls back to upstream behavior:
+
+```toml
+[tui]
+terminal_title = ["activity", "run-state", "project-name"]
+```
+
+Set this in the file, not with `codex -c`: any `-c` override makes Codex run without the shared daemon.
+
+`read_remote_manifest` in `src/detect/manifest.rs` ignores the downloaded Codex manifest (outside tests) so a newer upstream catalog manifest can't replace the fork's rules. Upstream Codex rule changes therefore only arrive through merges. When merging, keep both rules and a `version` at least as new as upstream's.
+
 ## Remotes
 
 - `origin` → this fork (`git@github.com:icelen/herdr.git`)

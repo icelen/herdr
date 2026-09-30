@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=trae
-# HERDR_INTEGRATION_VERSION=3
+# HERDR_INTEGRATION_VERSION=4
 
 set -eu
 
@@ -16,6 +16,18 @@ case "$action" in
   session|working|blocked|idle|release|notification) ;;
   *) exit 0 ;;
 esac
+
+# A shared traex app-server daemon runs hooks for every session with the
+# environment of whichever pane started it, so HERDR_PANE_ID would point at the
+# wrong pane. Only report when the pane's own traex process runs the hook.
+pid="$PPID"
+for _ in 1 2 3; do
+  case "$pid" in ''|0|1) break ;; esac
+  case "$(ps -ww -o command= -p "$pid" 2>/dev/null || true)" in
+    *" app-server"*) exit 0 ;;
+  esac
+  pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')"
+done
 
 [ "${HERDR_ENV:-}" = "1" ] || exit 0
 [ -n "${HERDR_SOCKET_PATH:-}" ] || exit 0

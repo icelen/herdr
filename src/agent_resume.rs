@@ -139,13 +139,19 @@ pub fn persisted_session_from_launch_args(
     let [command, session_id] = args else {
         return None;
     };
-    if agent != crate::detect::Agent::Codex || command != "resume" || session_id.starts_with('-') {
+    // Fork: traex shares Codex's `resume <id>` launch syntax.
+    let (source, label) = match agent {
+        crate::detect::Agent::Codex => ("herdr:codex", "codex"),
+        crate::detect::Agent::Trae => ("herdr:trae", "trae"),
+        _ => return None,
+    };
+    if command != "resume" || session_id.starts_with('-') {
         return None;
     }
 
     Some(PersistedAgentSession {
-        source: "herdr:codex".into(),
-        agent: "codex".into(),
+        source: source.into(),
+        agent: label.into(),
         session_ref: AgentSessionRef::id(session_id.clone())?,
     })
 }
@@ -210,6 +216,9 @@ pub fn plan(source: &str, agent: &str, session_ref: &AgentSessionRef) -> Option<
         }
         ("herdr:codex", "codex", AgentSessionRefKind::Id) => {
             vec!["codex".into(), "resume".into(), session_ref.value.clone()]
+        }
+        ("herdr:trae", "trae", AgentSessionRefKind::Id) => {
+            vec!["traex".into(), "resume".into(), session_ref.value.clone()]
         }
         ("herdr:copilot", "copilot", AgentSessionRefKind::Id) => {
             vec!["copilot".into(), format!("--resume={}", session_ref.value)]
@@ -345,6 +354,8 @@ pub(crate) fn is_official_agent_source(source: &str, agent: &str) -> bool {
             | ("herdr:antigravity_cli", "agy")
             | ("herdr:grok", "grok")
             | ("herdr:letta", "letta")
+            // Fork: the Trae integration reports native session ids.
+            | ("herdr:trae", "trae")
     )
 }
 
@@ -413,6 +424,34 @@ mod tests {
             "herdr:opencode",
             "opencode"
         ));
+    }
+
+    #[test]
+    fn trae_session_reports_resume_with_traex() {
+        let session_ref =
+            session_ref_from_report("herdr:trae", "trae", Some("trae-session".into()), None)
+                .unwrap();
+        let resume = plan("herdr:trae", "trae", &session_ref).unwrap();
+        assert_eq!(resume.argv, vec!["traex", "resume", "trae-session"]);
+        assert!(session_ref_from_snapshot(
+            "herdr:trae",
+            "trae",
+            AgentSessionRefKind::Id,
+            "trae-session"
+        )
+        .is_some());
+        let launched = persisted_session_from_launch_args(
+            crate::detect::Agent::Trae,
+            &["resume".into(), "trae-session".into()],
+        )
+        .unwrap();
+        assert_eq!(launched.source, "herdr:trae");
+        assert_eq!(launched.session_ref.value, "trae-session");
+        assert!(persisted_session_from_launch_args(
+            crate::detect::Agent::Trae,
+            &["resume".into(), "--last".into()]
+        )
+        .is_none());
     }
 
     #[test]

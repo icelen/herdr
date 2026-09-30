@@ -322,7 +322,7 @@ const GROK_HOOK_ASSET: &str = if cfg!(windows) {
 const GROK_INTEGRATION_VERSION: u32 = 2;
 const TRAE_HOOK_INSTALL_NAME: &str = "herdr-agent-state.sh";
 const TRAE_HOOK_ASSET: &str = include_str!("assets/trae/herdr-agent-state.sh");
-const TRAE_INTEGRATION_VERSION: u32 = 3;
+const TRAE_INTEGRATION_VERSION: u32 = 4;
 // Trae no longer runs hooks from the legacy user-level ~/.trae/hooks.json, and
 // only runs plugin hooks it has a trusted hash for. Herdr therefore ships its
 // hooks as a local Trae plugin (installed through the Trae CLI) and records a
