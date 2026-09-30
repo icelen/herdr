@@ -161,6 +161,17 @@ pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
     })
 }
 
+fn command_hook_installed(hooks: &Map<String, Value>, event: &str, command: &str) -> bool {
+    hooks
+        .get(event)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|entry| entry.get("hooks").and_then(Value::as_array))
+        .flatten()
+        .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
+}
+
 pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
     let dir = codex_dir()?;
     check_config_targets(&dir, &["hooks.json", "config.toml"])?;
@@ -192,29 +203,22 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
     )?;
     remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
     remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
-    remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
     remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
-    remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
-    remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
-    ensure_command_hook(
-        hooks,
-        "SessionStart",
-        hook_command(&hook_path, Some("session")),
-        10,
-        None,
-    )?;
     for (event, action) in [
+        ("SessionStart", "session"),
         ("UserPromptSubmit", "working"),
         ("Stop", "idle"),
         ("Interrupt", "idle"),
     ] {
-        ensure_command_hook(
-            hooks,
-            event,
-            hook_command(&hook_path, Some(action)),
-            10,
-            None,
-        )?;
+        // Fork: Codex trusts hooks by their position in hooks.json, so an
+        // installed hook must stay where it is; removing and re-appending it
+        // would shift, and untrust, the hooks after it.
+        let command = hook_command(&hook_path, Some(action));
+        if command_hook_installed(hooks, event, &command) {
+            continue;
+        }
+        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
+        ensure_command_hook(hooks, event, command, 10, None)?;
     }
     remove_legacy_bash_hook_file(&hook_path)?;
 

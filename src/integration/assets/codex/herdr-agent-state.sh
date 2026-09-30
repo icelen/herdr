@@ -17,6 +17,13 @@ case "$action" in
   *) exit 0 ;;
 esac
 
+# A shared Codex app-server daemon runs hooks for every session with the
+# environment of whichever pane started it, so HERDR_PANE_ID would point at the
+# wrong pane. Only report when the pane's own Codex process runs the hook.
+case "$(ps -ww -o command= -p "$PPID" 2>/dev/null || true)" in
+  *" app-server"*) exit 0 ;;
+esac
+
 [ "${HERDR_ENV:-}" = "1" ] || exit 0
 [ -n "${HERDR_SOCKET_PATH:-}" ] || exit 0
 [ -n "${HERDR_PANE_ID:-}" ] || exit 0

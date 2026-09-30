@@ -1417,6 +1417,52 @@ fn install_codex_is_idempotent_for_hook_entries_and_feature_flag() {
 }
 
 #[test]
+fn install_codex_keeps_existing_hook_positions() {
+    let _lock = integration_env_lock();
+    let base = unique_base();
+    let home = base.join("home");
+    let codex_dir = home.join(".codex");
+    fs::create_dir_all(&codex_dir).unwrap();
+    let hook_path = codex_dir.join(CODEX_HOOK_INSTALL_NAME);
+    let session_command = hook_command(&hook_path, Some("session"));
+    let hooks = serde_json::json!({
+        "hooks": {
+            "SessionStart": [
+                {"hooks": [{"type": "command", "command": session_command, "timeout": 10}]},
+                {"hooks": [{"type": "command", "command": "echo keep", "timeout": 5}]}
+            ]
+        }
+    });
+    fs::write(
+        codex_dir.join("hooks.json"),
+        serde_json::to_string(&hooks).unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("HOME", &home);
+
+    install_codex().unwrap();
+    install_codex().unwrap();
+
+    // Codex trusts hooks by position, so existing entries must not move.
+    let hooks: Value =
+        serde_json::from_str(&fs::read_to_string(codex_dir.join("hooks.json")).unwrap()).unwrap();
+    let session_start = hooks["hooks"]["SessionStart"].as_array().unwrap();
+    assert_eq!(session_start.len(), 2);
+    assert_eq!(session_start[0]["hooks"][0]["command"], session_command);
+    assert_eq!(session_start[1]["hooks"][0]["command"], "echo keep");
+    for event in ["UserPromptSubmit", "Stop", "Interrupt"] {
+        assert_eq!(
+            hooks["hooks"][event].as_array().unwrap().len(),
+            1,
+            "{event}"
+        );
+    }
+
+    std::env::remove_var("HOME");
+    let _ = fs::remove_dir_all(base);
+}
+
+#[test]
 fn install_codex_only_migrates_top_level_feature_flags() {
     let _lock = integration_env_lock();
     let base = unique_base();
