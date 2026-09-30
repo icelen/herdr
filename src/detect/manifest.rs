@@ -747,6 +747,13 @@ fn read_override_manifest(path: &Path) -> Result<AgentManifest, String> {
 }
 
 fn read_remote_manifest(agent: Agent, bundled: &AgentManifest) -> Option<LoadedManifest> {
+    // Fork: the bundled Codex manifest carries run-state title rules that the
+    // upstream catalog lacks, so a newer published manifest must not replace it.
+    // Upstream Codex rule changes arrive through merges instead. Upstream tests
+    // use Codex as their sample agent for the remote cache, so they keep it.
+    if cfg!(not(test)) && agent == Agent::Codex {
+        return None;
+    }
     let path = super::manifest_update::remote_manifest_path(agent);
     if !path.exists() {
         return None;
