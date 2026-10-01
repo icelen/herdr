@@ -407,7 +407,7 @@ pub struct CodexPane {
     pub ws_idx: usize,
     pub tab_idx: usize,
     pub pane: u32,
-    /// `HERDR_*` id assignments for the pane's worktree `herdr-env` file.
+    /// `HERDR_*` id assignments for the pane's worktree `herdr-pane-ids` file.
     pub herdr_env: String,
 }
 
@@ -974,7 +974,7 @@ mod tests {
             .agent_session
             .is_none());
         assert_eq!(
-            std::fs::read_to_string(base.join(".git").join("herdr-env")).unwrap(),
+            std::fs::read_to_string(base.join(".git").join("herdr-pane-ids")).unwrap(),
             "HERDR_WORKSPACE_ID=w1\nHERDR_TAB_ID=w1:t1\nHERDR_PANE_ID=w1:p1\n"
         );
 

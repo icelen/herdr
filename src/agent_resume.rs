@@ -145,10 +145,10 @@ pub fn codex_worktree_session(cwd: &Path) -> Option<PersistedAgentSession> {
 }
 
 const CODEX_WORKTREE_SESSION_FILE: &str = "herdr-codex-session";
-const CODEX_WORKTREE_ENV_FILE: &str = "herdr-env";
+const CODEX_WORKTREE_ENV_FILE: &str = "herdr-pane-ids";
 
 /// Fork: writes the Herdr ids of the pane running Codex in `cwd` to its
-/// worktree, where the agent can `. "$(git rev-parse --git-path herdr-env)"`.
+/// worktree, where the agent can `. "$(git rev-parse --git-path herdr-pane-ids)"`.
 /// Leaves the file untouched when the content is unchanged.
 pub fn write_codex_worktree_env(cwd: &Path, content: &str) {
     let Some(git_dir) = git_dir(cwd) else {
