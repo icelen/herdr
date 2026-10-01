@@ -28,6 +28,20 @@ fn is_completion_transition(change: &EffectiveStateChange) -> bool {
     is_background_completion_transition(change.previous_state, change.state)
 }
 
+/// Fork: session saves apply each Codex worktree's session record (see
+/// `crate::persist::apply_codex_worktree_sessions`), so save when a pane starts
+/// or stops running Codex, and when a Codex turn ends, which follows the
+/// record being written for a new or switched session.
+fn codex_worktree_record_may_apply(change: &EffectiveStateChange) -> bool {
+    let codex = Some(crate::detect::Agent::Codex);
+    let codex_changed = change.previous_known_agent != change.known_agent
+        && (change.previous_known_agent == codex || change.known_agent == codex);
+    let codex_turn_ended = change.known_agent == codex
+        && change.state == AgentState::Idle
+        && change.previous_state != AgentState::Idle;
+    codex_changed || codex_turn_ended
+}
+
 fn public_tab_id_for_index(ws: &crate::workspace::Workspace, tab_idx: usize) -> Option<String> {
     let tab_number = ws.public_tab_number(tab_idx)?;
     Some(crate::workspace::public_tab_id_for_number(
@@ -1732,6 +1746,13 @@ impl AppState {
         if mutation.session_ref_changed || managed_changed || agent_name_changed {
             self.mark_session_dirty();
         }
+        if mutation
+            .effective_state_change
+            .as_ref()
+            .is_some_and(codex_worktree_record_may_apply)
+        {
+            self.mark_session_dirty();
+        }
         let agent_released = mutation.agent_released;
         let change = mutation.effective_state_change.or(unchanged_change)?;
         let suppress_completion = force_suppress_completion
@@ -3210,6 +3231,32 @@ mod tests {
         assert!(terminal.managed_agent_interactive_ready());
         assert_eq!(terminal.state, AgentState::Unknown);
         assert!(terminal.last_agent_completion_seq.is_none());
+    }
+
+    #[test]
+    fn codex_detection_and_turn_end_mark_session_dirty() {
+        let mut app = app_with_workspaces(&["one"]);
+        let pane_id = app.workspaces[0].tabs[0].root_pane;
+        let observe = |app: &mut AppState, agent, state| {
+            app.session_dirty = false;
+            app.handle_app_event(AppEvent::StateChanged {
+                pane_id,
+                agent: Some(agent),
+                state,
+                visible_blocker: false,
+                visible_working: state == AgentState::Working,
+                process_exited: false,
+                observed_at: Instant::now(),
+            });
+            app.session_dirty
+        };
+
+        assert!(!observe(&mut app, Agent::Pi, AgentState::Working));
+        assert!(!observe(&mut app, Agent::Pi, AgentState::Idle));
+        assert!(observe(&mut app, Agent::Codex, AgentState::Working));
+        assert!(!observe(&mut app, Agent::Codex, AgentState::Working));
+        assert!(observe(&mut app, Agent::Codex, AgentState::Idle));
+        assert!(!observe(&mut app, Agent::Codex, AgentState::Idle));
     }
 
     #[test]
