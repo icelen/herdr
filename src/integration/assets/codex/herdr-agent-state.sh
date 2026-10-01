@@ -19,21 +19,22 @@ esac
 
 # A shared Codex app-server daemon runs hooks for every session with the
 # environment of whichever pane started it, so HERDR_PANE_ID would point at the
-# wrong pane. Only report when the pane's own Codex process runs the hook.
+# wrong pane. Only report to a pane when the pane's own Codex process runs the
+# hook; the worktree session record below is written either way.
+in_daemon=0
 case "$(ps -ww -o command= -p "$PPID" 2>/dev/null || true)" in
-  *" app-server"*) exit 0 ;;
+  *" app-server"*) in_daemon=1 ;;
 esac
 
-[ "${HERDR_ENV:-}" = "1" ] || exit 0
-[ -n "${HERDR_SOCKET_PATH:-}" ] || exit 0
-[ -n "${HERDR_PANE_ID:-}" ] || exit 0
+[ "$action" = "session" ] || [ "$in_daemon" = "0" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
-HERDR_ACTION="$action" HERDR_HOOK_INPUT_FILE="$hook_input_file" python3 - <<'PY'
+HERDR_ACTION="$action" HERDR_HOOK_INPUT_FILE="$hook_input_file" HERDR_CODEX_IN_DAEMON="$in_daemon" python3 - <<'PY'
 import json
 import os
 import random
 import socket
+import subprocess
 import time
 
 source = "herdr:codex"
@@ -41,9 +42,7 @@ action = os.environ.get("HERDR_ACTION", "")
 pane_id = os.environ.get("HERDR_PANE_ID")
 socket_path = os.environ.get("HERDR_SOCKET_PATH")
 hook_input_file = os.environ.get("HERDR_HOOK_INPUT_FILE")
-
-if not pane_id or not socket_path:
-    raise SystemExit(0)
+in_daemon = os.environ.get("HERDR_CODEX_IN_DAEMON") == "1"
 
 hook_input = {}
 if hook_input_file:
@@ -70,6 +69,57 @@ if action == "session":
         raise SystemExit(0)
 inherited_session_id = os.environ.get("CODEX_THREAD_ID")
 if inherited_session_id and inherited_session_id != agent_session_id:
+    raise SystemExit(0)
+
+
+def is_subagent_session():
+    # Subagent threads record their parent in the transcript's session_meta.
+    try:
+        with open(hook_input.get("transcript_path") or "", encoding="utf-8") as handle:
+            meta = json.loads(handle.readline())
+    except Exception:
+        return False
+    payload = meta.get("payload") if meta.get("type") == "session_meta" else None
+    return isinstance(payload, dict) and isinstance(payload.get("source"), dict)
+
+
+def record_worktree_session(session_id):
+    # Herdr reads this per-worktree record to resume the Codex session in the
+    # pane working there, which also covers sessions a shared daemon runs.
+    cwd = hook_input.get("cwd")
+    if not isinstance(cwd, str) or not os.path.isdir(cwd):
+        return
+    try:
+        result = subprocess.run(
+            ["git", "-C", cwd, "rev-parse", "--git-path", "herdr-codex-session"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except Exception:
+        return
+    relative = result.stdout.strip()
+    if result.returncode != 0 or not relative:
+        return
+    path = os.path.join(cwd, relative)
+    temporary = f"{path}.{os.getpid()}.tmp"
+    try:
+        with open(temporary, "w", encoding="utf-8") as handle:
+            handle.write(session_id + "\n")
+        os.replace(temporary, path)
+    except Exception:
+        try:
+            os.unlink(temporary)
+        except Exception:
+            pass
+
+
+if action == "session" and agent_session_id:
+    if is_subagent_session():
+        raise SystemExit(0)
+    record_worktree_session(agent_session_id)
+
+if in_daemon or os.environ.get("HERDR_ENV") != "1" or not pane_id or not socket_path:
     raise SystemExit(0)
 session_start_source = hook_input.get("source") if action == "session" else None
 if not isinstance(session_start_source, str) or not session_start_source:

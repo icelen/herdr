@@ -7,6 +7,8 @@ enum SessionSaveJob {
     Save {
         snapshot: crate::persist::SessionSnapshot,
         history: Option<crate::persist::SessionHistorySnapshot>,
+        /// Fork: panes running Codex; see `crate::persist::CodexPane`.
+        codex_panes: Vec<crate::persist::CodexPane>,
     },
 }
 
@@ -55,8 +57,47 @@ impl App {
                     &self.terminal_runtimes,
                 )
             });
-            SessionSaveJob::Save { snapshot, history }
+            SessionSaveJob::Save {
+                snapshot,
+                history,
+                codex_panes: self.codex_panes(),
+            }
         }
+    }
+
+    fn codex_panes(&self) -> Vec<crate::persist::CodexPane> {
+        let mut panes = Vec::new();
+        for (ws_idx, workspace) in self.state.workspaces.iter().enumerate() {
+            for (tab_idx, tab) in workspace.tabs.iter().enumerate() {
+                for pane_id in tab.panes.keys() {
+                    let runs_codex = tab
+                        .terminal_id(*pane_id)
+                        .and_then(|terminal_id| self.state.terminals.get(terminal_id))
+                        .is_some_and(|terminal| {
+                            terminal.effective_known_agent() == Some(crate::detect::Agent::Codex)
+                        });
+                    if !runs_codex {
+                        continue;
+                    }
+                    let (Some(tab_id), Some(public_pane_id)) = (
+                        self.public_tab_id(ws_idx, tab_idx),
+                        self.public_pane_id(ws_idx, *pane_id),
+                    ) else {
+                        continue;
+                    };
+                    panes.push(crate::persist::CodexPane {
+                        ws_idx,
+                        tab_idx,
+                        pane: pane_id.raw(),
+                        herdr_env: format!(
+                            "HERDR_WORKSPACE_ID={}\nHERDR_TAB_ID={tab_id}\nHERDR_PANE_ID={public_pane_id}\n",
+                            self.public_workspace_id(ws_idx)
+                        ),
+                    });
+                }
+            }
+        }
+        panes
     }
 
     pub(crate) fn start_background_session_save(&mut self) {
@@ -142,6 +183,13 @@ fn run_session_save_job(
     };
     match job {
         SessionSaveJob::Clear => writer.clear(),
-        SessionSaveJob::Save { snapshot, history } => writer.save(&snapshot, history.as_ref()),
+        SessionSaveJob::Save {
+            mut snapshot,
+            history,
+            codex_panes,
+        } => {
+            crate::persist::apply_codex_worktree_sessions(&mut snapshot, &codex_panes);
+            writer.save(&snapshot, history.as_ref())
+        }
     }
 }

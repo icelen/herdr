@@ -161,15 +161,27 @@ pub(crate) fn install_claude() -> io::Result<ClaudeInstallPaths> {
     })
 }
 
-fn command_hook_installed(hooks: &Map<String, Value>, event: &str, command: &str) -> bool {
-    hooks
-        .get(event)
-        .and_then(Value::as_array)
+/// Finds an installed command hook and sets its timeout in place, returning
+/// whether it was found.
+fn update_installed_hook_timeout(
+    hooks: &mut Map<String, Value>,
+    event: &str,
+    command: &str,
+    timeout: u64,
+) -> bool {
+    let Some(hook) = hooks
+        .get_mut(event)
+        .and_then(Value::as_array_mut)
         .into_iter()
         .flatten()
-        .filter_map(|entry| entry.get("hooks").and_then(Value::as_array))
+        .filter_map(|entry| entry.get_mut("hooks").and_then(Value::as_array_mut))
         .flatten()
-        .any(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
+        .find(|hook| hook.get("command").and_then(Value::as_str) == Some(command))
+    else {
+        return false;
+    };
+    hook["timeout"] = json!(timeout);
+    true
 }
 
 pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
@@ -204,21 +216,23 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
     remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
     remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
     remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
-    for (event, action) in [
-        ("SessionStart", "session"),
-        ("UserPromptSubmit", "working"),
-        ("Stop", "idle"),
-        ("Interrupt", "idle"),
+    // Fork: Codex clamps Interrupt hook timeouts to 3s and warns on every start
+    // when a hook asks for more.
+    for (event, action, timeout) in [
+        ("SessionStart", "session", 10),
+        ("UserPromptSubmit", "working", 10),
+        ("Stop", "idle", 10),
+        ("Interrupt", "idle", 3),
     ] {
         // Fork: Codex trusts hooks by their position in hooks.json, so an
         // installed hook must stay where it is; removing and re-appending it
         // would shift, and untrust, the hooks after it.
         let command = hook_command(&hook_path, Some(action));
-        if command_hook_installed(hooks, event, &command) {
+        if update_installed_hook_timeout(hooks, event, &command, timeout) {
             continue;
         }
         remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-        ensure_command_hook(hooks, event, command, 10, None)?;
+        ensure_command_hook(hooks, event, command, timeout, None)?;
     }
     remove_legacy_bash_hook_file(&hook_path)?;
 

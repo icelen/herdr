@@ -401,6 +401,44 @@ fn capture_tab(
     }
 }
 
+/// Fork: a pane running Codex, located by its snapshot indices, with the Herdr
+/// ids its Codex session should see.
+pub struct CodexPane {
+    pub ws_idx: usize,
+    pub tab_idx: usize,
+    pub pane: u32,
+    /// `HERDR_*` id assignments for the pane's worktree `herdr-env` file.
+    pub herdr_env: String,
+}
+
+/// Fork: call on the save thread so the file I/O stays off the event loop. A
+/// worktree's recorded Codex session is newer than whatever the pane holds when
+/// the session was started or switched on a shared daemon. The daemon also
+/// gives every session the `HERDR_*` ids of the pane that started it, so write
+/// the pane's real ids into its worktree for the agent to read.
+pub fn apply_codex_worktree_sessions(snapshot: &mut SessionSnapshot, codex_panes: &[CodexPane]) {
+    for codex_pane in codex_panes {
+        let Some(pane) = snapshot
+            .workspaces
+            .get_mut(codex_pane.ws_idx)
+            .and_then(|workspace| workspace.tabs.get_mut(codex_pane.tab_idx))
+            .and_then(|tab| tab.panes.get_mut(&codex_pane.pane))
+        else {
+            continue;
+        };
+        crate::agent_resume::write_codex_worktree_env(&pane.cwd, &codex_pane.herdr_env);
+        let Some(session) = crate::agent_resume::codex_worktree_session(&pane.cwd) else {
+            continue;
+        };
+        pane.agent_session = Some(PaneAgentSessionSnapshot {
+            source: session.source,
+            agent: session.agent,
+            kind: session.session_ref.kind,
+            value: session.session_ref.value,
+        });
+    }
+}
+
 pub(super) fn layout_fingerprint(snapshot: &SessionSnapshot) -> Option<String> {
     use sha2::{Digest, Sha256};
 
@@ -873,6 +911,74 @@ mod tests {
         assert_eq!(ws.tabs[0].root_pane, Some(0));
         assert_eq!(ws.tabs[0].panes[&0].cwd, PathBuf::from("/tmp/pion"));
         assert_eq!(ws.tabs[0].panes[&1].cwd, PathBuf::from("/tmp/herdr"));
+    }
+
+    #[test]
+    fn codex_worktree_sessions_replace_only_listed_codex_panes() {
+        let base = std::env::temp_dir().join(format!(
+            "herdr-snapshot-codex-worktree-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(base.join(".git")).unwrap();
+        std::fs::write(
+            base.join(".git").join("herdr-codex-session"),
+            "worktree-id\n",
+        )
+        .unwrap();
+
+        let state = state_with_workspaces(&["a", "b"]);
+        let mut snapshot = capture_from_state(&state);
+        let mut pane_ids = Vec::new();
+        for workspace in &mut snapshot.workspaces {
+            let (pane_id, pane) = workspace.tabs[0].panes.iter_mut().next().unwrap();
+            pane.cwd = base.clone();
+            pane_ids.push(*pane_id);
+        }
+
+        apply_codex_worktree_sessions(
+            &mut snapshot,
+            &[
+                CodexPane {
+                    ws_idx: 0,
+                    tab_idx: 0,
+                    pane: pane_ids[0],
+                    herdr_env: "HERDR_WORKSPACE_ID=w1\nHERDR_TAB_ID=w1:t1\nHERDR_PANE_ID=w1:p1\n"
+                        .into(),
+                },
+                CodexPane {
+                    ws_idx: 5,
+                    tab_idx: 0,
+                    pane: 1,
+                    herdr_env: String::new(),
+                },
+            ],
+        );
+
+        let codex = snapshot.workspaces[0].tabs[0].panes[&pane_ids[0]]
+            .agent_session
+            .as_ref()
+            .unwrap();
+        assert_eq!(
+            (
+                codex.source.as_str(),
+                codex.agent.as_str(),
+                codex.value.as_str()
+            ),
+            ("herdr:codex", "codex", "worktree-id")
+        );
+        assert!(snapshot.workspaces[1].tabs[0].panes[&pane_ids[1]]
+            .agent_session
+            .is_none());
+        assert_eq!(
+            std::fs::read_to_string(base.join(".git").join("herdr-env")).unwrap(),
+            "HERDR_WORKSPACE_ID=w1\nHERDR_TAB_ID=w1:t1\nHERDR_PANE_ID=w1:p1\n"
+        );
+
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

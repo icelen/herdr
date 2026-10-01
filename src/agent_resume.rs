@@ -132,6 +132,58 @@ pub fn session_ref_from_report(
     agent_session_id.and_then(AgentSessionRef::id)
 }
 
+/// Fork: the Codex hook records the latest main-thread session for a worktree in
+/// that worktree's git directory, because a shared Codex daemon cannot report
+/// it to the right pane. Returns that session for a pane working in `cwd`.
+pub fn codex_worktree_session(cwd: &Path) -> Option<PersistedAgentSession> {
+    let record = std::fs::read_to_string(git_dir(cwd)?.join(CODEX_WORKTREE_SESSION_FILE)).ok()?;
+    Some(PersistedAgentSession {
+        source: "herdr:codex".into(),
+        agent: "codex".into(),
+        session_ref: AgentSessionRef::id(record.trim())?,
+    })
+}
+
+const CODEX_WORKTREE_SESSION_FILE: &str = "herdr-codex-session";
+const CODEX_WORKTREE_ENV_FILE: &str = "herdr-env";
+
+/// Fork: writes the Herdr ids of the pane running Codex in `cwd` to its
+/// worktree, where the agent can `. "$(git rev-parse --git-path herdr-env)"`.
+/// Leaves the file untouched when the content is unchanged.
+pub fn write_codex_worktree_env(cwd: &Path, content: &str) {
+    let Some(git_dir) = git_dir(cwd) else {
+        return;
+    };
+    let path = git_dir.join(CODEX_WORKTREE_ENV_FILE);
+    if std::fs::read_to_string(&path).is_ok_and(|current| current == content) {
+        return;
+    }
+    let temporary = git_dir.join(format!(
+        "{CODEX_WORKTREE_ENV_FILE}.{}.tmp",
+        std::process::id()
+    ));
+    if let Err(err) =
+        std::fs::write(&temporary, content).and_then(|()| std::fs::rename(&temporary, &path))
+    {
+        let _ = std::fs::remove_file(&temporary);
+        tracing::debug!(path = %path.display(), %err, "failed to write codex worktree herdr env");
+    }
+}
+
+/// The git directory `git rev-parse --git-path` resolves against: `.git` itself,
+/// or the per-worktree directory a linked worktree's `.git` file points to.
+fn git_dir(cwd: &Path) -> Option<std::path::PathBuf> {
+    cwd.ancestors().find_map(|dir| {
+        let dot_git = dir.join(".git");
+        if dot_git.is_dir() {
+            return Some(dot_git);
+        }
+        let pointer = std::fs::read_to_string(&dot_git).ok()?;
+        let target = pointer.strip_prefix("gitdir:")?.trim();
+        Some(dir.join(target))
+    })
+}
+
 pub fn persisted_session_from_launch_args(
     agent: crate::detect::Agent,
     args: &[String],
@@ -424,6 +476,55 @@ mod tests {
             "herdr:opencode",
             "opencode"
         ));
+    }
+
+    #[test]
+    fn codex_worktree_session_reads_main_checkout_and_linked_worktree_records() {
+        let base = std::env::temp_dir().join(format!(
+            "herdr-codex-worktree-session-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let repo = base.join("repo");
+        let linked_git_dir = repo.join(".git").join("worktrees").join("feature");
+        let worktree = base.join("feature");
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        std::fs::create_dir_all(&linked_git_dir).unwrap();
+        std::fs::create_dir_all(&worktree).unwrap();
+        std::fs::write(
+            worktree.join(".git"),
+            "gitdir: ../repo/.git/worktrees/feature\n",
+        )
+        .unwrap();
+
+        assert!(codex_worktree_session(&repo).is_none());
+
+        std::fs::write(
+            repo.join(".git").join(CODEX_WORKTREE_SESSION_FILE),
+            "main-id\n",
+        )
+        .unwrap();
+        std::fs::write(
+            linked_git_dir.join(CODEX_WORKTREE_SESSION_FILE),
+            "linked-id\n",
+        )
+        .unwrap();
+        let from_subdir = codex_worktree_session(&repo.join("src")).unwrap();
+        assert_eq!(from_subdir.source, "herdr:codex");
+        assert_eq!(from_subdir.agent, "codex");
+        assert_eq!(from_subdir.session_ref.value, "main-id");
+        assert_eq!(
+            codex_worktree_session(&worktree).unwrap().session_ref.value,
+            "linked-id"
+        );
+
+        std::fs::write(linked_git_dir.join(CODEX_WORKTREE_SESSION_FILE), "  \n").unwrap();
+        assert!(codex_worktree_session(&worktree).is_none());
+
+        let _ = std::fs::remove_dir_all(base);
     }
 
     #[test]

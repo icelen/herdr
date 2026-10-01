@@ -29,6 +29,12 @@ terminal_title = ["activity", "run-state", "project-name"]
 
 Set this in the file, not with `codex -c`: any `-c` override makes Codex run without the shared daemon.
 
+Because daemon sessions can't report their session id to a pane, the Codex hook also records each main-thread session (subagent threads are skipped) in the session's worktree: `herdr-codex-session` under `git rev-parse --git-path` (for a linked worktree, `.git/worktrees/<name>/`, so it stays out of `git status` and goes away with `git worktree remove`). On every session save, `apply_codex_worktree_sessions` (`src/persist/snapshot.rs`, called from the save thread in `src/app/session.rs`) replaces the saved session of each pane running Codex with its worktree's record (`codex_worktree_session` in `src/agent_resume.rs`), so restarts resume the latest session even after `/new`, `/resume`, or a fresh `codex`. This assumes one resume-worthy Codex session per worktree; the last one started wins.
+
+The daemon also runs every session's shell commands with the environment of the pane that started it, so `$HERDR_WORKSPACE_ID`, `$HERDR_TAB_ID` and `$HERDR_PANE_ID` inside a daemon-hosted Codex session name that pane, not the session's own. The same save pass writes the pane's real ids to `herdr-env` beside `herdr-codex-session` (`write_codex_worktree_env`, rewritten only when they change); an agent loads them with `. "$(git rev-parse --git-path herdr-env)"`. The file is refreshed only while a pane in that worktree is running Codex.
+
+The Codex installer keeps existing hook entries in place (Codex trusts hooks by their position in `hooks.json`) and sets the `Interrupt` hook's timeout to 3s in place, since Codex clamps it and otherwise warns on every start.
+
 `read_remote_manifest` in `src/detect/manifest.rs` ignores the downloaded Codex manifest (outside tests) so a newer upstream catalog manifest can't replace the fork's rules. Upstream Codex rule changes therefore only arrive through merges. When merging, keep both rules and a `version` at least as new as upstream's.
 
 ## Remotes

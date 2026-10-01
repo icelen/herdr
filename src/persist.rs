@@ -15,7 +15,7 @@ pub use self::restore::restore;
 #[cfg(unix)]
 pub use self::restore::{handoff_pane_aliases, restore_handoff};
 pub use self::snapshot::{
-    capture, capture_history, DirectionSnapshot, LayoutSnapshot, SessionHistorySnapshot,
-    SessionSnapshot, TabSnapshot, WorkspaceSnapshot,
+    apply_codex_worktree_sessions, capture, capture_history, CodexPane, DirectionSnapshot,
+    LayoutSnapshot, SessionHistorySnapshot, SessionSnapshot, TabSnapshot, WorkspaceSnapshot,
 };
 pub(crate) use self::writer::SessionWriter;

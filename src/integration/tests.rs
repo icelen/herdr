@@ -1425,11 +1425,15 @@ fn install_codex_keeps_existing_hook_positions() {
     fs::create_dir_all(&codex_dir).unwrap();
     let hook_path = codex_dir.join(CODEX_HOOK_INSTALL_NAME);
     let session_command = hook_command(&hook_path, Some("session"));
+    let interrupt_command = hook_command(&hook_path, Some("idle"));
     let hooks = serde_json::json!({
         "hooks": {
             "SessionStart": [
                 {"hooks": [{"type": "command", "command": session_command, "timeout": 10}]},
                 {"hooks": [{"type": "command", "command": "echo keep", "timeout": 5}]}
+            ],
+            "Interrupt": [
+                {"hooks": [{"type": "command", "command": interrupt_command, "timeout": 10}]}
             ]
         }
     });
@@ -1457,6 +1461,10 @@ fn install_codex_keeps_existing_hook_positions() {
             "{event}"
         );
     }
+    // Codex clamps Interrupt hooks to 3s; the existing entry is fixed in place.
+    let interrupt = &hooks["hooks"]["Interrupt"][0]["hooks"][0];
+    assert_eq!(interrupt["command"], interrupt_command);
+    assert_eq!(interrupt["timeout"], 3);
 
     std::env::remove_var("HOME");
     let _ = fs::remove_dir_all(base);
