@@ -1,7 +1,18 @@
 id = "codex"
-version = "2026.09.29.1"
+version = "2026.10.06.1"
 min_engine_version = 3
-updated_at = "2026-09-29T22:00:00Z"
+updated_at = "2026-10-06T23:00:00Z"
+
+[[rules]]
+id = "other_thread_approval"
+state = "unknown"
+priority = 1200
+region = "bottom_non_empty_lines(3)"
+# A shared Codex daemon shows a windowless thread's approval request (e.g. a
+# subagent's) in every connected window, with this extra hint and an "Action
+# Required" title. It is not this pane's own state, so keep the previous one.
+skip_state_update = true
+contains = ["or o to open thread"]
 
 [[rules]]
 id = "osc_title_blocked"
