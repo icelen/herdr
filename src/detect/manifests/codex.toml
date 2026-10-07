@@ -1,7 +1,7 @@
 id = "codex"
-version = "2026.10.06.1"
+version = "2026.10.07.1"
 min_engine_version = 3
-updated_at = "2026-10-06T23:00:00Z"
+updated_at = "2026-10-07T21:00:00Z"
 
 [[rules]]
 id = "other_thread_approval"
@@ -21,6 +21,18 @@ priority = 1100
 region = "osc_title"
 visible_blocker = true
 contains = ["Action Required"]
+
+[[rules]]
+id = "osc_title_run_state_starting"
+state = "unknown"
+priority = 1080
+region = "osc_title"
+# A Codex window shows a spinner with the run-state `Starting` while it
+# (re)connects to its session after a resume or daemon restart. No turn is
+# running, so keep the previous state instead of reporting working and then a
+# false completion when `Ready` follows.
+skip_state_update = true
+regex = ['(?:^|\| )(?:[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] )?Starting(?: \||$| [⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏])']
 
 [[rules]]
 id = "osc_title_working"
