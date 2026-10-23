@@ -216,23 +216,16 @@ pub(crate) fn install_codex() -> io::Result<CodexInstallPaths> {
     remove_hook_commands(hooks, "PermissionRequest", &hook_path, Some("blocked"))?;
     remove_hook_commands(hooks, "SessionStart", &hook_path, Some("idle"))?;
     remove_hook_commands(hooks, "PreToolUse", &hook_path, Some("working"))?;
-    // Fork: Codex clamps Interrupt hook timeouts to 3s and warns on every start
-    // when a hook asks for more.
-    for (event, action, timeout) in [
-        ("SessionStart", "session", 10),
-        ("UserPromptSubmit", "working", 10),
-        ("Stop", "idle", 10),
-        ("Interrupt", "idle", 3),
-    ] {
-        // Fork: Codex trusts hooks by their position in hooks.json, so an
-        // installed hook must stay where it is; removing and re-appending it
-        // would shift, and untrust, the hooks after it.
-        let command = hook_command(&hook_path, Some(action));
-        if update_installed_hook_timeout(hooks, event, &command, timeout) {
-            continue;
-        }
-        remove_hook_commands(hooks, event, &hook_path, Some(action))?;
-        ensure_command_hook(hooks, event, command, timeout, None)?;
+    remove_hook_commands(hooks, "UserPromptSubmit", &hook_path, Some("working"))?;
+    remove_hook_commands(hooks, "Stop", &hook_path, Some("idle"))?;
+    remove_hook_commands(hooks, "Interrupt", &hook_path, Some("idle"))?;
+    // Fork: Codex trusts hooks by their position in hooks.json, so an installed
+    // hook must stay where it is; removing and re-appending it would shift, and
+    // untrust, the hooks after it.
+    let session_command = hook_command(&hook_path, Some("session"));
+    if !update_installed_hook_timeout(hooks, "SessionStart", &session_command, 10) {
+        remove_hook_commands(hooks, "SessionStart", &hook_path, Some("session"))?;
+        ensure_command_hook(hooks, "SessionStart", session_command, 10, None)?;
     }
     remove_legacy_bash_hook_file(&hook_path)?;
 

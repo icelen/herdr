@@ -3,7 +3,7 @@
 # managed by herdr; reinstalling or updating the integration overwrites this file.
 # add custom hooks beside this file instead of editing it.
 # HERDR_INTEGRATION_ID=codex
-# HERDR_INTEGRATION_VERSION=9
+# HERDR_INTEGRATION_VERSION=10
 
 set -eu
 
@@ -13,7 +13,7 @@ trap 'rm -f "$hook_input_file"' EXIT HUP INT TERM
 cat >"$hook_input_file" 2>/dev/null || true
 
 case "$action" in
-  session|working|idle) ;;
+  session) ;;
   *) exit 0 ;;
 esac
 
@@ -26,7 +26,6 @@ case "$(ps -ww -o command= -p "$PPID" 2>/dev/null || true)" in
   *" app-server"*) in_daemon=1 ;;
 esac
 
-[ "$action" = "session" ] || [ "$in_daemon" = "0" ] || exit 0
 command -v python3 >/dev/null 2>&1 || exit 0
 
 HERDR_ACTION="$action" HERDR_HOOK_INPUT_FILE="$hook_input_file" HERDR_CODEX_IN_DAEMON="$in_daemon" python3 - <<'PY'
@@ -55,18 +54,16 @@ if hook_input_file:
         hook_input = {}
 
 hook_event_name = str(hook_input.get("hook_event_name") or "")
-expected_events = {"session": ("SessionStart",), "working": ("UserPromptSubmit",), "idle": ("Stop", "Interrupt")}[action]
-if hook_event_name and hook_event_name not in expected_events:
+if hook_event_name and hook_event_name != "SessionStart":
     raise SystemExit(0)
 
 request_id = f"{source}:{int(time.time() * 1000)}:{random.randrange(1_000_000):06d}"
 report_seq = time.time_ns()
 session_id = hook_input.get("session_id")
 agent_session_id = session_id if isinstance(session_id, str) and session_id else None
-if action == "session":
-    transcript_path = hook_input.get("transcript_path")
-    if not isinstance(transcript_path, str) or not transcript_path.strip():
-        raise SystemExit(0)
+transcript_path = hook_input.get("transcript_path")
+if not isinstance(transcript_path, str) or not transcript_path.strip():
+    raise SystemExit(0)
 inherited_session_id = os.environ.get("CODEX_THREAD_ID")
 if inherited_session_id and inherited_session_id != agent_session_id:
     raise SystemExit(0)
@@ -121,7 +118,7 @@ if action == "session" and agent_session_id:
 
 if in_daemon or os.environ.get("HERDR_ENV") != "1" or not pane_id or not socket_path:
     raise SystemExit(0)
-session_start_source = hook_input.get("source") if action == "session" else None
+session_start_source = hook_input.get("source") if hook_event_name == "SessionStart" else None
 if not isinstance(session_start_source, str) or not session_start_source:
     session_start_source = None
 if agent_session_id:
@@ -132,16 +129,11 @@ if agent_session_id:
         "seq": report_seq,
         "agent_session_id": agent_session_id,
     }
-    if action == "session":
-        if session_start_source:
-            params["session_start_source"] = session_start_source
-        method = "pane.report_agent_session"
-    else:
-        params["state"] = action
-        method = "pane.report_agent"
+    if session_start_source:
+        params["session_start_source"] = session_start_source
     request = {
         "id": request_id,
-        "method": method,
+        "method": "pane.report_agent_session",
         "params": params,
     }
 else:
