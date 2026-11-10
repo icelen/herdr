@@ -1682,3 +1682,68 @@ fn semantic_notifications_use_client_policy_and_stable_navigation_targets() {
     assert!(state.visible_notification.is_none());
     assert_eq!(state.pending_notifications.len(), 1);
 }
+
+#[test]
+fn focus_change_reveals_focused_agent_but_keeps_manual_scroll_otherwise() {
+    let with_focus = |revision: u64, focused: &str| {
+        let mut projected = snapshot();
+        projected.revision = revision;
+        projected.focused_pane_id = Some(focused.into());
+        projected.agents = (1..=12)
+            .map(|index| ClientShellAgent {
+                pane_id: format!("pane_{index}"),
+                workspace_id: "ws_1".into(),
+                tab_id: "tab_1".into(),
+                name: Some(format!("agent {index}")),
+                display_agent: None,
+                agent: Some("pi".into()),
+                title: None,
+                terminal_title: None,
+                terminal_title_stripped: None,
+                agent_status: AgentStatus::Idle,
+                state_change_seq: index,
+                state_labels: Vec::new(),
+                tokens: Vec::new(),
+                focused: format!("pane_{index}") == focused,
+            })
+            .collect();
+        Box::new(projected)
+    };
+    let surface_at = |revision: u64| {
+        let mut surface = surface();
+        surface.projection_revision = revision;
+        surface
+    };
+    let visible = |state: &ClientShellState, pane_id: &str| {
+        state
+            .hits
+            .agents
+            .iter()
+            .any(|(_, visible)| visible == pane_id)
+    };
+    let mut state = ClientShellState::new(ClientShellConfig::from_config(&Config::default()));
+    state.set_snapshot(with_focus(1, "pane_1"));
+    state.set_pane_surface(surface());
+    state.compose(100, 28).unwrap();
+    assert!(visible(&state, "pane_1"));
+    assert!(state.hits.agent_max_scroll > 0, "agent list must overflow");
+
+    state.agent_scroll = usize::MAX;
+    state.compose(100, 28).unwrap();
+    assert!(!visible(&state, "pane_1"));
+
+    // An update that keeps the same focused pane leaves the user's scroll alone.
+    let scroll = state.agent_scroll;
+    state.set_pane_surface(surface_at(2));
+    state.set_snapshot(with_focus(2, "pane_1"));
+    state.compose(100, 28).unwrap();
+    assert_eq!(state.agent_scroll, scroll);
+    assert!(!visible(&state, "pane_1"));
+
+    // Focus moving to an offscreen agent from outside the list, e.g. a
+    // workspace click, scrolls it into view.
+    state.set_pane_surface(surface_at(3));
+    state.set_snapshot(with_focus(3, "pane_2"));
+    state.compose(100, 28).unwrap();
+    assert!(visible(&state, "pane_2"));
+}

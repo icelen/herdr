@@ -37,6 +37,10 @@ The Codex installer keeps an installed `SessionStart` hook entry in place (Codex
 
 `read_remote_manifest` in `src/detect/manifest.rs` ignores the downloaded Codex manifest (outside tests) so a newer upstream catalog manifest can't replace the fork's rules. Upstream Codex rule changes therefore only arrive through merges. When merging, keep both rules and a `version` at least as new as upstream's.
 
+## Agent list follows focus
+
+Upstream scrolls the spaces list to the focused workspace whenever focus changes, but the agent list only scrolls itself for previous/next-agent navigation, so clicking a workspace can leave its focused agent off-screen. The fork's `reveal_focused_agent` flag (`src/client/shell/state.rs`) is set when the snapshot's `focused_pane_id` changes, and `render_agent_list` (`src/client/shell/agent_sidebar.rs`) uses it to scroll the focused agent into view, mirroring `reveal_focused_workspace`. Switching machines clears it (`src/client/shell/endpoints.rs`), because upstream keeps the aggregate agent scroll across machine switches. Covered by `focus_change_reveals_focused_agent_but_keeps_manual_scroll_otherwise`. Drop the patch if upstream adds an equivalent.
+
 ## Remotes
 
 - `origin` → this fork (`git@github.com:icelen/herdr.git`)

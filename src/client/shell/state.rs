@@ -888,6 +888,7 @@ pub(crate) struct ClientShellState {
     pub(super) tab_scroll: usize,
     pub(super) mobile_switcher_scroll: usize,
     pub(super) reveal_focused_workspace: bool,
+    pub(super) reveal_focused_agent: bool,
     pub(super) reveal_mobile_workspace: bool,
     pub(super) mobile_switcher_suspended: bool,
     pub(super) reveal_focused_tab: bool,
@@ -1062,6 +1063,7 @@ impl ClientShellState {
             tab_scroll: 0,
             mobile_switcher_scroll: 0,
             reveal_focused_workspace: true,
+            reveal_focused_agent: true,
             reveal_mobile_workspace: false,
             mobile_switcher_suspended: false,
             reveal_focused_tab: true,
@@ -1429,6 +1431,14 @@ impl ClientShellState {
             != snapshot.focused_workspace_id.as_deref()
         {
             self.reveal_focused_workspace = true;
+        }
+        if self
+            .snapshot
+            .as_deref()
+            .and_then(|current| current.focused_pane_id.as_deref())
+            != snapshot.focused_pane_id.as_deref()
+        {
+            self.reveal_focused_agent = true;
         }
         if tab_layout_changed
             || self

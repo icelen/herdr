@@ -561,6 +561,7 @@ pub(super) fn render_expanded(
         state.active_endpoint_id,
         config,
         state.agent_scroll,
+        state.reveal_focused_agent,
         hits,
     );
     hits.sidebar_toggle = Rect::new(

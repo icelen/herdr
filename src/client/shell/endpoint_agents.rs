@@ -50,6 +50,7 @@ pub(super) fn render_expanded(
     active_endpoint_id: &ClientEndpointId,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    reveal_focused_agent: &mut bool,
     hits: &mut ShellHitMap,
 ) {
     if !super::agent_sidebar::render_agent_panel_header(
@@ -69,8 +70,12 @@ pub(super) fn render_expanded(
         agent_view_label.map(|_| " no matching agents"),
         config,
         agent_scroll,
+        reveal_focused_agent,
         hits,
         |row| row.agent.rows.len(),
+        // Every machine reports its own focused pane; only the active one's is
+        // the pane the user is looking at.
+        |row| row.agent.focused && &row.endpoint_id == active_endpoint_id,
         |buffer, rect, row, hits| {
             super::agent_sidebar::render_agent_row(buffer, rect, &row.agent, config);
             if row.stale {

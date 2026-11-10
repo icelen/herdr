@@ -55,6 +55,7 @@ pub(super) fn render_agent_panel(
     snapshot: &ClientShellSnapshot,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    reveal_focused_agent: &mut bool,
     hits: &mut ShellHitMap,
 ) {
     if !render_agent_panel_header(
@@ -78,8 +79,10 @@ pub(super) fn render_agent_panel(
             .map(|_| " no matching agents"),
         config,
         agent_scroll,
+        reveal_focused_agent,
         hits,
         |row| row.rows.len(),
+        |row| row.focused,
         |buffer, rect, row, hits| {
             hits.agents.push((rect, row.pane_id.clone()));
             render_agent_row(buffer, rect, row, config);
@@ -158,8 +161,10 @@ pub(super) fn render_agent_list<T>(
     empty_message: Option<&str>,
     config: &ClientShellConfig,
     agent_scroll: &mut usize,
+    reveal_focused_agent: &mut bool,
     hits: &mut ShellHitMap,
     row_lines: impl Fn(&T) -> usize,
+    row_focused: impl Fn(&T) -> bool,
     mut render_row: impl FnMut(&mut Buffer, Rect, &T, &mut ShellHitMap),
 ) {
     let body = Rect::new(
@@ -169,6 +174,7 @@ pub(super) fn render_agent_list<T>(
         area.height.saturating_sub(3),
     );
     hits.agent_body = body;
+    let reveal_focus = !body.is_empty() && std::mem::take(reveal_focused_agent);
     if body.is_empty() || rows.is_empty() {
         *agent_scroll = 0;
         if let Some(message) = empty_message.filter(|_| !body.is_empty()) {
@@ -201,6 +207,17 @@ pub(super) fn render_agent_list<T>(
             }
         })
         .collect::<Vec<_>>();
+    // Focus can move to an agent from outside this list (a workspace click,
+    // a split), so bring its row into view the way the spaces list does.
+    if let Some(target) = rows.iter().position(&row_focused).filter(|_| reveal_focus) {
+        *agent_scroll = super::scroll::list_scroll_start_to_reveal(
+            &row_heights,
+            &gaps,
+            body.height,
+            *agent_scroll,
+            target,
+        );
+    }
     let metrics =
         super::scroll::list_scroll_metrics(&row_heights, &gaps, body.height, *agent_scroll);
     hits.agent_max_scroll = metrics.max_offset_from_bottom;
